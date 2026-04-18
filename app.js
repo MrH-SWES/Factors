@@ -48,7 +48,7 @@ async function init() {
   scene.background = new THREE.Color(0x0a0a0a);
 
   // Volumetric 'Dust' — dusty cavern feel
-  scene.fog = new THREE.FogExp2(0x1a1b1a, 0.02);
+  scene.fog = new THREE.FogExp2(0x000000, 0.015);
 
   // Generate shared concrete texture
   concreteTexture = createConcreteTexture();
@@ -60,7 +60,7 @@ async function init() {
     0.1,
     200
   );
-  camera.position.set(0, 5, 20);
+  camera.position.set(0, 4, 22);
   camera.lookAt(0, 6, 0);
 
   // 4. Renderer with shadows (antialias disabled for mobile performance)
@@ -92,9 +92,9 @@ async function init() {
 
   // Secondary spotlight: dimmer, hitting a stage area on the back floor
   const stageSpot = new THREE.SpotLight(0xffffff, 30);
-  stageSpot.position.set(0, 18, -15);
-  stageSpot.target.position.set(0, 0, -15);
-  stageSpot.angle = Math.PI / 4;
+  stageSpot.position.set(0, 15, -28);
+  stageSpot.target.position.set(0, 0, -28);
+  stageSpot.angle = Math.PI / 3;
   stageSpot.penumbra = 0.8;
   stageSpot.decay = 2;
   stageSpot.distance = 40;
@@ -140,7 +140,7 @@ function createRoom() {
 
   const roomW = 30; // width  (x)
   const roomH = 20; // height (y)
-  const roomD = 40; // depth  (z)
+  const roomD = 61; // depth  (z) — back wall at z ≈ -30
   const thick = 1;  // wall thickness
 
   // Helper: create a static box with mesh + Rapier collider
@@ -177,16 +177,16 @@ function createRoom() {
 
   // Stage — thin cylinder on the far back floor
   const stageRadius = 4;
-  const stageHeight = 0.3;
+  const stageHeight = 0.2;
   const stageGeo = new THREE.CylinderGeometry(stageRadius, stageRadius, stageHeight, 48);
   const stageMesh = new THREE.Mesh(stageGeo, wallMat);
   stageMesh.receiveShadow = true;
-  stageMesh.castShadow = false;
-  stageMesh.position.set(0, stageHeight / 2, -roomD / 2 + 5);
+  stageMesh.castShadow = true;
+  stageMesh.position.set(0, 0.1, -28);
   scene.add(stageMesh);
 
   // Rapier collider for the stage cylinder (approximated as a cylinder)
-  const stageBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, stageHeight / 2, -roomD / 2 + 5);
+  const stageBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0.1, -28);
   const stageRb = world.createRigidBody(stageBodyDesc);
   const stageCd = RAPIER.ColliderDesc.cylinder(stageHeight / 2, stageRadius)
     .setRestitution(0.0)
@@ -194,15 +194,8 @@ function createRoom() {
   world.createCollider(stageCd, stageRb);
 }
 
-// ── Altar Table ──────────────────────────────────────────────────────
+// ── Altar Table (slab on pedestal) ───────────────────────────────────
 function createAltar() {
-  const altarW = 8;
-  const altarH = 2;
-  const altarD = 4;
-  const px = 0;
-  const py = altarH / 2;
-  const pz = 6; // foreground position
-
   const altarMat = new THREE.MeshStandardMaterial({
     color: 0x1e1e1e,
     roughness: 0.95,
@@ -212,19 +205,47 @@ function createAltar() {
     bumpScale: 0.08,
   });
 
-  const geo = new THREE.BoxGeometry(altarW, altarH, altarD);
-  const mesh = new THREE.Mesh(geo, altarMat);
-  mesh.receiveShadow = true;
-  mesh.castShadow = true;
-  mesh.position.set(px, py, pz);
-  scene.add(mesh);
+  const pz = 6; // foreground position
 
-  const bodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(px, py, pz);
-  const rb = world.createRigidBody(bodyDesc);
-  const cd = RAPIER.ColliderDesc.cuboid(altarW / 2, altarH / 2, altarD / 2)
+  // Pedestal — slightly narrower base
+  const pedW = 6;
+  const pedH = 1;
+  const pedD = 3;
+  const pedY = pedH / 2;
+
+  const pedGeo = new THREE.BoxGeometry(pedW, pedH, pedD);
+  const pedMesh = new THREE.Mesh(pedGeo, altarMat);
+  pedMesh.receiveShadow = true;
+  pedMesh.castShadow = true;
+  pedMesh.position.set(0, pedY, pz);
+  scene.add(pedMesh);
+
+  const pedBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, pedY, pz);
+  const pedRb = world.createRigidBody(pedBodyDesc);
+  const pedCd = RAPIER.ColliderDesc.cuboid(pedW / 2, pedH / 2, pedD / 2)
     .setRestitution(0.0)
     .setFriction(0.8);
-  world.createCollider(cd, rb);
+  world.createCollider(pedCd, pedRb);
+
+  // Slab — thick stone slab on top of the pedestal
+  const slabW = 8;
+  const slabH = 1.5;
+  const slabD = 4;
+  const slabY = pedH + slabH / 2;
+
+  const slabGeo = new THREE.BoxGeometry(slabW, slabH, slabD);
+  const slabMesh = new THREE.Mesh(slabGeo, altarMat);
+  slabMesh.receiveShadow = true;
+  slabMesh.castShadow = true;
+  slabMesh.position.set(0, slabY, pz);
+  scene.add(slabMesh);
+
+  const slabBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, slabY, pz);
+  const slabRb = world.createRigidBody(slabBodyDesc);
+  const slabCd = RAPIER.ColliderDesc.cuboid(slabW / 2, slabH / 2, slabD / 2)
+    .setRestitution(0.0)
+    .setFriction(0.8);
+  world.createCollider(slabCd, slabRb);
 }
 
 // ── Spawn Block on Click (Soapstone look) ────────────────────────────
