@@ -8,17 +8,50 @@ window.onerror = function (msg, src, line, col, err) {
 
 // ── Globals ──────────────────────────────────────────────────────────
 let scene, camera, renderer, world;
+let concreteTexture; // shared procedural concrete texture
 const bodies = []; // { mesh, rigidBody } pairs for sync
+
+// ── Procedural Concrete Texture ──────────────────────────────────────
+function createConcreteTexture(size = 256) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.createImageData(size, size);
+  const data = imageData.data;
+
+  for (let i = 0; i < size * size; i++) {
+    const v = 100 + Math.random() * 60; // grayscale range 100–160
+    data[i * 4] = v;
+    data[i * 4 + 1] = v;
+    data[i * 4 + 2] = v;
+    data[i * 4 + 3] = 255;
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(4, 4);
+  return texture;
+}
 
 // ── Bootstrap ────────────────────────────────────────────────────────
 async function init() {
   // 1. Rapier WASM initialisation (async/await for mobile WASM memory)
   await RAPIER.init();
-  world = new RAPIER.World({ x: 0.0, y: -9.81, z: 0.0 });
+  world = new RAPIER.World({ x: 0.0, y: -15.0, z: 0.0 });
 
   // 2. Three.js scene
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a0a0a);
+
+  // Volumetric 'Dust' — dusty cavern feel
+  scene.fog = new THREE.FogExp2(0x1a1b1a, 0.02);
+
+  // Generate shared concrete texture
+  concreteTexture = createConcreteTexture();
 
   // 3. Camera — low angle, tilted slightly upward
   camera = new THREE.PerspectiveCamera(
@@ -77,6 +110,11 @@ async function init() {
   const hemiLight = new THREE.HemisphereLight(0xffffff, 0x222222, 0.2);
   scene.add(hemiLight);
 
+  // Rim light behind altar — cool blue/white for edge definition
+  const rimLight = new THREE.PointLight(0xe0e0ff, 50);
+  rimLight.position.set(0, 3, 3); // slightly behind the altar (altar is at z=6, back wall is further back)
+  scene.add(rimLight);
+
   // 6. Room & Altar
   createRoom();
   createAltar();
@@ -95,6 +133,9 @@ function createRoom() {
     color: 0x2a2a2a,
     roughness: 0.9,
     metalness: 0.0,
+    map: concreteTexture,
+    bumpMap: concreteTexture,
+    bumpScale: 0.05,
   });
 
   const roomW = 30; // width  (x)
@@ -148,6 +189,9 @@ function createAltar() {
     color: 0x1e1e1e,
     roughness: 0.95,
     metalness: 0.0,
+    map: concreteTexture,
+    bumpMap: concreteTexture,
+    bumpScale: 0.05,
   });
 
   const geo = new THREE.BoxGeometry(altarW, altarH, altarD);
@@ -185,6 +229,9 @@ function onClickSpawn(event) {
     color,
     roughness: 0.8,
     metalness: 0.0,
+    map: concreteTexture,
+    bumpMap: concreteTexture,
+    bumpScale: 0.05,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;
@@ -202,7 +249,7 @@ function onClickSpawn(event) {
     halfSize
   )
     .setRestitution(0.0) // zero bounciness
-    .setFriction(0.9)
+    .setFriction(0.8)
     .setDensity(10.0);
   world.createCollider(colliderDesc, rigidBody);
 
