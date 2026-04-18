@@ -7,9 +7,16 @@
     <style>
         body { margin: 0; overflow: hidden; background-color: #0a0a0a; }
         canvas { display: block; }
+        #startBtn {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            padding: 20px 40px; font-size: 24px; cursor: pointer;
+            background: #333; color: #fff; border: 2px solid #888; border-radius: 8px;
+            z-index: 10;
+        }
     </style>
 </head>
 <body>
+    <button id="startBtn">Start</button>
     <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1,13 +1,18 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import RAPIER from "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.12.0/rapier.es.js";
 
+// ── Mobile Debugger ──────────────────────────────────────────────────
+window.onerror = function (msg, src, line, col, err) {
+  alert("Error: " + msg + "\nSource: " + src + "\nLine: " + line);
+};
+
 // ── Globals ──────────────────────────────────────────────────────────
 let scene, camera, renderer, world;
 const bodies = []; // { mesh, rigidBody } pairs for sync
 
 // ── Bootstrap ────────────────────────────────────────────────────────
 async function init() {
-  // 1. Rapier WASM initialisation
+  // 1. Rapier WASM initialisation (async/await for mobile WASM memory)
   await RAPIER.init();
   world = new RAPIER.World({ x: 0.0, y: -9.81, z: 0.0 });
 
@@ -25,14 +30,14 @@ async function init() {
   camera.position.set(0, 3, 18);
   camera.lookAt(0, 4, 0);
 
-  // 4. Renderer with shadows
-  renderer = new THREE.WebGLRenderer({ antialias: true });
+  // 4. Renderer with shadows (antialias disabled for mobile performance)
+  renderer = new THREE.WebGLRenderer({ antialias: false });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.8;
+  renderer.toneMappingExposure = 1.0;
   document.body.appendChild(renderer.domElement);
 
   // 5. Lighting — 'Holy Grail' vibe
@@ -45,8 +50,8 @@ async function init() {
   altarSpot.decay = 2;
   altarSpot.distance = 40;
   altarSpot.castShadow = true;
-  altarSpot.shadow.mapSize.width = 2048;
-  altarSpot.shadow.mapSize.height = 2048;
+  altarSpot.shadow.mapSize.width = 512;
+  altarSpot.shadow.mapSize.height = 512;
   altarSpot.shadow.camera.near = 1;
   altarSpot.shadow.camera.far = 40;
   scene.add(altarSpot);
@@ -61,12 +66,15 @@ async function init() {
   stageSpot.decay = 2;
   stageSpot.distance = 35;
   stageSpot.castShadow = true;
-  stageSpot.shadow.mapSize.width = 1024;
-  stageSpot.shadow.mapSize.height = 1024;
+  stageSpot.shadow.mapSize.width = 512;
+  stageSpot.shadow.mapSize.height = 512;
   stageSpot.shadow.camera.near = 1;
   stageSpot.shadow.camera.far = 35;
   scene.add(stageSpot);
   scene.add(stageSpot.target);
+
+  // Bright ambient light for visual safety (temporary — remove once geometry is confirmed visible)
+  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
   // Minimal ambient fill so shadows aren't absolute black
   scene.add(new THREE.AmbientLight(0x222222, 0.3));
@@ -75,8 +83,8 @@ async function init() {
   createRoom();
   createAltar();
 
-  // 7. Events
-  window.addEventListener("click", onClickSpawn);
+  // 7. Events (pointerdown for mobile touch support)
+  window.addEventListener("pointerdown", onClickSpawn);
   window.addEventListener("resize", onResize);
 
   // 8. Start loop
@@ -229,5 +237,13 @@ function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-// ── Go ──────────────────────────────────────────────────────────────
-init();
+// ── Mobile Initialization (gated behind user gesture) ───────────────
+const startBtn = document.getElementById("startBtn");
+if (startBtn) {
+  startBtn.addEventListener("pointerdown", async () => {
+    startBtn.remove();
+    await init();
+  });
+} else {
+  init();
+}
