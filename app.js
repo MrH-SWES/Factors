@@ -60,7 +60,7 @@ async function init() {
     0.1,
     200
   );
-  camera.position.set(0, 3, 18);
+  camera.position.set(0, 5, 20);
   camera.lookAt(0, 4, 0);
 
   // 4. Renderer with shadows (antialias disabled for mobile performance)
@@ -76,9 +76,9 @@ async function init() {
   // 5. Lighting — 'Holy Grail' vibe
   // Primary spotlight: directly above the altar table
   const altarSpot = new THREE.SpotLight(0xffffff, 500);
-  altarSpot.position.set(0, 18, 6);
-  altarSpot.target.position.set(0, 2, 6);
-  altarSpot.angle = Math.PI / 10;
+  altarSpot.position.set(5, 12, 10);
+  altarSpot.target.position.set(0, 1, 6);
+  altarSpot.angle = Math.PI / 4;
   altarSpot.penumbra = 0.9;
   altarSpot.decay = 1.0;
   altarSpot.distance = 100;
@@ -107,7 +107,7 @@ async function init() {
   scene.add(stageSpot.target);
 
   // Hemisphere 'bounce' light — simulates light bouncing off concrete floor
-  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x222222, 0.2);
+  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x222222, 0.3);
   scene.add(hemiLight);
 
   // Rim light behind altar — cool blue/white for edge definition
@@ -130,7 +130,7 @@ async function init() {
 // ── Room (Brutalist Altar Room) ──────────────────────────────────────
 function createRoom() {
   const wallMat = new THREE.MeshStandardMaterial({
-    color: 0x2a2a2a,
+    color: 0x1a1a1a,
     roughness: 0.9,
     metalness: 0.0,
     map: concreteTexture,
