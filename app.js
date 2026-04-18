@@ -9,7 +9,8 @@ window.onerror = function (msg, src, line, col, err) {
 // ── Globals ──────────────────────────────────────────────────────────
 let scene, camera, renderer, world;
 let concreteTexture, concreteBumpTexture;
-let mirrorCubeCamera, mirrorRenderTarget;
+let mirrorCubeCamera, mirrorRenderTarget, mirrorMaterial;
+let mirrorMesh = null; // explicit reference to the '1' mirror block
 const bodies = []; // { mesh, rigidBody, pointLight? } pairs for sync
 const primeShaderMeshes = []; // meshes using supernova shader (need time uniform updates)
 let spawnCounter = 0; // tracks next number to spawn
@@ -201,6 +202,8 @@ function createPrimeMaterial() {
 }
 
 // ── Composite Brushed Aluminum Material ──────────────────────────────
+const compositeScreenSize = { w: window.innerWidth, h: window.innerHeight };
+
 function createCompositeMaterial() {
   const mat = new THREE.MeshStandardMaterial({
     color: 0xc8c8c8,
@@ -211,13 +214,15 @@ function createCompositeMaterial() {
   // Triple-layer logic via onBeforeCompile:
   // bright specular highlight top-left, subtle shadow bottom-right
   mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uScreenSize = { value: new THREE.Vector2(compositeScreenSize.w, compositeScreenSize.h) };
+    shader.fragmentShader = 'uniform vec2 uScreenSize;\n' + shader.fragmentShader;
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <output_fragment>',
       `
       #include <output_fragment>
 
       // Triple-Layer: specular highlight (top-left) and shadow (bottom-right)
-      vec2 screenUV = gl_FragCoord.xy / vec2(${window.innerWidth.toFixed(1)}, ${window.innerHeight.toFixed(1)});
+      vec2 screenUV = gl_FragCoord.xy / uScreenSize;
       float highlightFactor = smoothstep(0.3, 0.9, 1.0 - length(screenUV - vec2(0.2, 0.8)));
       float shadowFactor = smoothstep(0.3, 0.9, 1.0 - length(screenUV - vec2(0.8, 0.2)));
       gl_FragColor.rgb += vec3(0.15) * highlightFactor;
@@ -230,7 +235,9 @@ function createCompositeMaterial() {
 }
 
 // ── Mirror '1' Material (CubeCamera) ─────────────────────────────────
-function createMirrorCubeCamera() {
+function getOrCreateMirrorMaterial() {
+  if (mirrorMaterial) return mirrorMaterial;
+
   mirrorRenderTarget = new THREE.WebGLCubeRenderTarget(256, {
     generateMipmaps: true,
     minFilter: THREE.LinearMipmapLinearFilter,
@@ -238,11 +245,12 @@ function createMirrorCubeCamera() {
   mirrorCubeCamera = new THREE.CubeCamera(0.1, 100, mirrorRenderTarget);
   scene.add(mirrorCubeCamera);
 
-  return new THREE.MeshStandardMaterial({
+  mirrorMaterial = new THREE.MeshStandardMaterial({
     envMap: mirrorRenderTarget.texture,
     metalness: 1.0,
     roughness: 0.0,
   });
+  return mirrorMaterial;
 }
 
 // ── Bootstrap ────────────────────────────────────────────────────────
@@ -474,7 +482,7 @@ function onClickSpawn(event) {
 
   if (num === 1) {
     // ── '1' — Mirror Cube (CubeCamera real-time env map) ──
-    mat = createMirrorCubeCamera();
+    mat = getOrCreateMirrorMaterial();
   } else if (isPrime(num)) {
     // ── Prime — Supernova ShaderMaterial ──
     mat = createPrimeMaterial();
@@ -487,6 +495,11 @@ function onClickSpawn(event) {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   scene.add(mesh);
+
+  // Track the '1' mirror mesh explicitly
+  if (num === 1) {
+    mirrorMesh = mesh;
+  }
 
   // Add PointLight inside prime blocks for glow
   if (num > 1 && isPrime(num)) {
@@ -545,8 +558,7 @@ function loop() {
   }
 
   // Update mirror cube camera for '1' block (if it exists)
-  if (mirrorCubeCamera && bodies.length > 0 && bodies[0].mesh) {
-    const mirrorMesh = bodies[0].mesh;
+  if (mirrorCubeCamera && mirrorMesh) {
     mirrorMesh.visible = false;
     mirrorCubeCamera.position.copy(mirrorMesh.position);
     mirrorCubeCamera.update(renderer, scene);
@@ -561,6 +573,8 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  compositeScreenSize.w = window.innerWidth;
+  compositeScreenSize.h = window.innerHeight;
 }
 
 // ── Mobile Initialization (gated behind user gesture) ───────────────
