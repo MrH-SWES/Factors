@@ -55,13 +55,13 @@ async function init() {
 
   // 3. Camera — low angle, tilted slightly upward
   camera = new THREE.PerspectiveCamera(
-    50,
+    45,
     window.innerWidth / window.innerHeight,
     0.1,
     200
   );
   camera.position.set(0, 5, 20);
-  camera.lookAt(0, 4, 0);
+  camera.lookAt(0, 6, 0);
 
   // 4. Renderer with shadows (antialias disabled for mobile performance)
   renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -92,17 +92,17 @@ async function init() {
 
   // Secondary spotlight: dimmer, hitting a stage area on the back floor
   const stageSpot = new THREE.SpotLight(0xffffff, 30);
-  stageSpot.position.set(0, 16, -8);
-  stageSpot.target.position.set(0, 0, -10);
-  stageSpot.angle = Math.PI / 8;
+  stageSpot.position.set(0, 18, -15);
+  stageSpot.target.position.set(0, 0, -15);
+  stageSpot.angle = Math.PI / 4;
   stageSpot.penumbra = 0.8;
   stageSpot.decay = 2;
-  stageSpot.distance = 35;
+  stageSpot.distance = 40;
   stageSpot.castShadow = true;
   stageSpot.shadow.mapSize.width = 512;
   stageSpot.shadow.mapSize.height = 512;
   stageSpot.shadow.camera.near = 1;
-  stageSpot.shadow.camera.far = 35;
+  stageSpot.shadow.camera.far = 40;
   scene.add(stageSpot);
   scene.add(stageSpot.target);
 
@@ -135,7 +135,7 @@ function createRoom() {
     metalness: 0.0,
     map: concreteTexture,
     bumpMap: concreteTexture,
-    bumpScale: 0.05,
+    bumpScale: 0.08,
   });
 
   const roomW = 30; // width  (x)
@@ -174,6 +174,24 @@ function createRoom() {
 
   // Right Wall
   addStaticBox(thick, roomH, roomD, roomW / 2 - thick / 2, roomH / 2, 0);
+
+  // Stage — thin cylinder on the far back floor
+  const stageRadius = 4;
+  const stageHeight = 0.3;
+  const stageGeo = new THREE.CylinderGeometry(stageRadius, stageRadius, stageHeight, 48);
+  const stageMesh = new THREE.Mesh(stageGeo, wallMat);
+  stageMesh.receiveShadow = true;
+  stageMesh.castShadow = false;
+  stageMesh.position.set(0, stageHeight / 2, -roomD / 2 + 5);
+  scene.add(stageMesh);
+
+  // Rapier collider for the stage cylinder (approximated as a cylinder)
+  const stageBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, stageHeight / 2, -roomD / 2 + 5);
+  const stageRb = world.createRigidBody(stageBodyDesc);
+  const stageCd = RAPIER.ColliderDesc.cylinder(stageHeight / 2, stageRadius)
+    .setRestitution(0.0)
+    .setFriction(0.8);
+  world.createCollider(stageCd, stageRb);
 }
 
 // ── Altar Table ──────────────────────────────────────────────────────
@@ -191,7 +209,7 @@ function createAltar() {
     metalness: 0.0,
     map: concreteTexture,
     bumpMap: concreteTexture,
-    bumpScale: 0.05,
+    bumpScale: 0.08,
   });
 
   const geo = new THREE.BoxGeometry(altarW, altarH, altarD);
@@ -221,17 +239,15 @@ function onClickSpawn(event) {
   const size = 1;
   const halfSize = size / 2;
 
-  // Soapstone material: medium-dark gray, matte — lightened for spotlight visibility
-  const shade = 0.18 + Math.random() * 0.04; // variation 0.18–0.22, averaging ~#333333
-  const color = new THREE.Color(shade, shade, shade);
+  // Soapstone material: dark matte #2a2a2a
   const geo = new THREE.BoxGeometry(size, size, size);
   const mat = new THREE.MeshStandardMaterial({
-    color,
-    roughness: 0.8,
+    color: 0x2a2a2a,
+    roughness: 0.9,
     metalness: 0.0,
     map: concreteTexture,
     bumpMap: concreteTexture,
-    bumpScale: 0.05,
+    bumpScale: 0.08,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;
