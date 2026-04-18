@@ -42,13 +42,13 @@ async function init() {
 
   // 5. Lighting — 'Holy Grail' vibe
   // Primary spotlight: directly above the altar table
-  const altarSpot = new THREE.SpotLight(0xffffff, 80);
+  const altarSpot = new THREE.SpotLight(0xffffff, 200);
   altarSpot.position.set(0, 18, 6);
   altarSpot.target.position.set(0, 2, 6);
   altarSpot.angle = Math.PI / 10;
   altarSpot.penumbra = 0.9;
-  altarSpot.decay = 2;
-  altarSpot.distance = 40;
+  altarSpot.decay = 1.0;
+  altarSpot.distance = 50;
   altarSpot.castShadow = true;
   altarSpot.shadow.mapSize.width = 512;
   altarSpot.shadow.mapSize.height = 512;
@@ -73,11 +73,9 @@ async function init() {
   scene.add(stageSpot);
   scene.add(stageSpot.target);
 
-  // Bright ambient light for visual safety (temporary — remove once geometry is confirmed visible)
-  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
-
-  // Minimal ambient fill so shadows aren't absolute black
-  scene.add(new THREE.AmbientLight(0x222222, 0.3));
+  // Hemisphere 'bounce' light — simulates light bouncing off concrete floor
+  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x000000, 0.1);
+  scene.add(hemiLight);
 
   // 6. Room & Altar
   createRoom();
@@ -179,8 +177,8 @@ function onClickSpawn(event) {
   const size = 1;
   const halfSize = size / 2;
 
-  // Soapstone material: very dark gray/black, matte
-  const shade = 0.04 + Math.random() * 0.04; // slight variation
+  // Soapstone material: medium-dark gray, matte — lightened for spotlight visibility
+  const shade = 0.12 + Math.random() * 0.04; // slight variation around #222222
   const color = new THREE.Color(shade, shade, shade);
   const geo = new THREE.BoxGeometry(size, size, size);
   const mat = new THREE.MeshStandardMaterial({
