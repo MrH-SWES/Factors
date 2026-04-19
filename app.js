@@ -332,8 +332,8 @@ const compositeScreenSize = { w: window.innerWidth, h: window.innerHeight };
 function createCompositeMaterial() {
   const mat = new THREE.MeshStandardMaterial({
     color: 0xc8ccd0,
-    metalness: 0.55,
-    roughness: 0.45,
+    metalness: 0.5,
+    roughness: 0.42,
     map: brushedMetalTexture,
   });
 
@@ -383,7 +383,7 @@ async function init() {
   scene.background = new THREE.Color(0x0a0a0a);
 
   // Volumetric 'Dust' — dusty cavern feel (dark gray lets light cones glow in air)
-  scene.fog = new THREE.FogExp2(0x0a0a0a, 0.015);
+  scene.fog = new THREE.FogExp2(0x0a0a0a, 0.012);
 
   // Generate shared concrete textures
   concreteTexture = createConcreteTexture();
@@ -392,13 +392,13 @@ async function init() {
 
   // 3. Camera — low-angle, monumental perspective
   camera = new THREE.PerspectiveCamera(
-    45,
+    55,
     window.innerWidth / window.innerHeight,
     0.1,
     200
   );
-  camera.position.set(0, 4.5, 22);
-  camera.lookAt(0, 3, -5);
+  camera.position.set(0, 5, 24);
+  camera.lookAt(0, 4, 0);
 
   // 4. Renderer with shadows
   renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -407,7 +407,7 @@ async function init() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.85;
+  renderer.toneMappingExposure = 0.8;
   document.body.appendChild(renderer.domElement);
 
   try {
@@ -432,15 +432,15 @@ async function init() {
 
   // 6. Lighting ──────────────────────────────────────────────────────────
   // A. Ambient Fill (Dim conference room baseline)
-  const ambient = new THREE.HemisphereLight(0x3a4050, 0x111111, 0.25);
+  const ambient = new THREE.HemisphereLight(0x3a4050, 0x111111, 0.3);
   scene.add(ambient);
 
   // B. Diffuse Altar Light (Second most well-lit, extremely soft)
-  const altarSpot = new THREE.SpotLight(0xffffff, 80);
-  altarSpot.position.set(0, 8, 14);
-  altarSpot.target.position.set(0, 1, 14);
-  altarSpot.angle = Math.PI / 4;
-  altarSpot.penumbra = 1.0;
+  const altarSpot = new THREE.SpotLight(0xfff5e6, 120);
+  altarSpot.position.set(0, 10, 16);
+  altarSpot.target.position.set(0, 1, 16);
+  altarSpot.angle = Math.PI / 3;
+  altarSpot.penumbra = 0.8;
   altarSpot.decay = 2.0;
   altarSpot.castShadow = true;
   scene.add(altarSpot);
@@ -452,31 +452,31 @@ async function init() {
   scene.add(obeliskTarget);
 
   // Top-front angled down
-  const spotFrontTop = new THREE.SpotLight(0xffffff, 120);
-  spotFrontTop.position.set(0, 15, STAGE_Z + 6);
+  const spotFrontTop = new THREE.SpotLight(0xffffff, 130);
+  spotFrontTop.position.set(0, 16, STAGE_Z + 8);
   spotFrontTop.target = obeliskTarget;
-  spotFrontTop.angle = 0.5;
-  spotFrontTop.penumbra = 0.6;
+  spotFrontTop.angle = 0.45;
+  spotFrontTop.penumbra = 0.55;
   spotFrontTop.decay = 2.0;
   spotFrontTop.castShadow = true;
   scene.add(spotFrontTop);
 
   // Left 45-degree
-  const spotLeft = new THREE.SpotLight(0xffffff, 80);
-  spotLeft.position.set(-8, 12, STAGE_Z + 4);
+  const spotLeft = new THREE.SpotLight(0xffffff, 90);
+  spotLeft.position.set(-8, 13, STAGE_Z + 5);
   spotLeft.target = obeliskTarget;
-  spotLeft.angle = 0.5;
-  spotLeft.penumbra = 0.6;
+  spotLeft.angle = 0.45;
+  spotLeft.penumbra = 0.55;
   spotLeft.decay = 2.0;
   spotLeft.castShadow = true;
   scene.add(spotLeft);
 
   // Right 45-degree
-  const spotRight = new THREE.SpotLight(0xffffff, 80);
-  spotRight.position.set(8, 12, STAGE_Z + 4);
+  const spotRight = new THREE.SpotLight(0xffffff, 90);
+  spotRight.position.set(8, 13, STAGE_Z + 5);
   spotRight.target = obeliskTarget;
-  spotRight.angle = 0.5;
-  spotRight.penumbra = 0.6;
+  spotRight.angle = 0.45;
+  spotRight.penumbra = 0.55;
   spotRight.decay = 2.0;
   spotRight.castShadow = true;
   scene.add(spotRight);
@@ -484,7 +484,7 @@ async function init() {
   // D. Back Wall Downlights (Architectural depth)
   const downlightDefs = [ { x: -6 }, { x: 0 }, { x: 6 } ];
   for (const dl of downlightDefs) {
-    const spot = new THREE.SpotLight(0xf5e6d0, 90);
+    const spot = new THREE.SpotLight(0xf5e6d0, 100);
     spot.position.set(dl.x, 9, -29);
     spot.target.position.set(dl.x, 0, -30);
     spot.angle = 0.35;
@@ -515,7 +515,7 @@ async function init() {
 // ── Room (Brutalist Concrete) ────────────────────────────────────────
 function createRoom() {
   const wallMat = new THREE.MeshStandardMaterial({
-    color: 0x4a4a4a,
+    color: 0x555555,
     roughness: 0.88,
     metalness: 0.0,
     map: concreteTexture,
@@ -523,10 +523,10 @@ function createRoom() {
     bumpScale: 0.8,
   });
 
-  // Matte poured-concrete floor — darker and smoother than walls
+  // Matte poured-concrete floor
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x2a2a2a,
-    roughness: 0.92,
+    color: 0x444444,
+    roughness: 0.9,
     metalness: 0.02,
     map: concreteTexture,
     bumpMap: concreteBumpTexture,
