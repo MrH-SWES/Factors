@@ -13,7 +13,29 @@ let mirrorCubeCamera, mirrorRenderTarget, mirrorMaterial;
 let mirrorMesh = null; // explicit reference to the '1' mirror block
 const bodies = []; // { mesh, rigidBody, pointLight? } pairs for sync
 const primeShaderMeshes = []; // meshes using supernova shader (need time uniform updates)
-let spawnCounter = 0; // tracks next number to spawn
+
+// ── Cold Open & Hinge State ──────────────────────────────────────────
+const STAGE_Z = -10;
+const STAGE_Y = 0.2; // stage surface height
+const ALTAR_Z = 14;
+const ALTAR_Y = 2.5; // top of altar slab
+const CUBE_SIZE = 1;
+const NUM_CUBES = 12;
+
+let obeliskGroup = null;       // THREE.Group holding the composite obelisk segments
+let obeliskSegments = [];      // array of { mesh, heightStart, heightEnd }
+let hingePoints = [];          // interactive hinge point objects
+let altarTrinkets = [];        // trinkets placed on the altar
+let coldOpenComplete = false;
+let foldingActive = false;
+let foldingComplete = false;
+let lastInteractionTime = 0;
+
+// Audio context for thud sounds
+let audioCtx = null;
+
+// GSAP is loaded globally via <script> tag
+const gsap = window.gsap;
 
 // ── Simplex Noise (compact 3D implementation) ────────────────────────
 // Based on Stefan Gustavson's GLSL simplex noise
@@ -328,17 +350,19 @@ async function init() {
   scene.add(stageSpot);
   scene.add(stageSpot.target);
 
-  // 6. Room, Altar & Stage Obelisk
+  // 6. Room, Altar & Cold Open
   createRoom();
   createAltar();
-  createObelisk();
 
   // 7. Events (pointerdown for mobile touch support)
-  window.addEventListener("pointerdown", onClickSpawn);
+  window.addEventListener("pointerdown", onPointerDown);
   window.addEventListener("resize", onResize);
 
   // 8. Start loop
   loop();
+
+  // 9. Start the #12 Cold Open sequence after a brief delay
+  gsap.delayedCall(0.5, startColdOpen);
 }
 
 // ── Room (Brutalist Concrete) ────────────────────────────────────────
@@ -464,97 +488,598 @@ function createAltar() {
   world.createCollider(slabCd, slabRb);
 }
 
-// ── Primary Obelisk on Stage ─────────────────────────────────────────
-function createObelisk() {
-  const obeliskMat = new THREE.MeshStandardMaterial({
-    color: 0x222222,
-    roughness: 0.85,
-    metalness: 0.05,
-    map: concreteTexture,
-    bumpMap: concreteBumpTexture,
-    bumpScale: 0.1,
-  });
+// ── Primary Obelisk — replaced by Cold Open sequence ─────────────────
 
-  // Tapered obelisk shape using a cylinder with a smaller top radius
-  const geo = new THREE.CylinderGeometry(0.4, 1.0, 6, 4);
-  const mesh = new THREE.Mesh(geo, obeliskMat);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  mesh.position.set(0, 3.3, -10); // sits on stage at z:-10
-  mesh.rotation.y = Math.PI / 4; // rotate 45° for diamond cross-section
-  scene.add(mesh);
-}
-
-// ── Spawn Block on Click (Trinkets / Factors) ────────────────────────
-function onClickSpawn(event) {
-  // Increment the spawn counter
-  spawnCounter++;
-  const num = spawnCounter;
-
-  // Map click X to a horizontal spawn offset above the altar
-  const ndcX = (event.clientX / window.innerWidth) * 2 - 1;
-
-  const spawnX = ndcX * 5;
-  const spawnY = 14; // drop from height inside the room
-  const spawnZ = 14 + (Math.random() - 0.5) * 3; // over the altar area (altar at z:14)
-
-  const size = 1;
-  const halfSize = size / 2;
-
-  const geo = new THREE.BoxGeometry(size, size, size);
+// ── Create Trinket on Altar ──────────────────────────────────────────
+function createTrinket(label, materialType) {
+  const trinketSize = 0.4;
+  const geo = new THREE.BoxGeometry(trinketSize, trinketSize, trinketSize);
   let mat;
-  let pointLight = null;
 
-  if (num === 1) {
-    // ── '1' — Mirror Cube (CubeCamera real-time env map) ──
-    mat = getOrCreateMirrorMaterial();
-  } else if (isPrime(num)) {
-    // ── Prime — Supernova ShaderMaterial ──
+  if (materialType === "mirror") {
+    mat = getOrCreateMirrorMaterial().clone();
+  } else if (materialType === "prime") {
     mat = createPrimeMaterial();
   } else {
-    // ── Composite — Brushed Aluminum ──
     mat = createCompositeMaterial();
   }
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+
+  // Place trinkets left-to-right along the altar
+  const xOffset = (altarTrinkets.length - 2) * 0.8;
+  mesh.position.set(xOffset, ALTAR_Y + trinketSize / 2 + 0.01, ALTAR_Z);
   scene.add(mesh);
 
-  // Track the '1' mirror mesh explicitly
-  if (num === 1) {
-    mirrorMesh = mesh;
-  }
-
-  // Add PointLight inside prime blocks for glow
-  if (num > 1 && isPrime(num)) {
-    pointLight = new THREE.PointLight(0xff6600, 30, 8, 2);
-    mesh.add(pointLight);
-  }
-
-  // Track supernova shader meshes for time uniform updates
-  if (num > 1 && isPrime(num)) {
+  if (materialType === "prime") {
     primeShaderMeshes.push(mesh);
+    const pl = new THREE.PointLight(0xff6600, 5, 4, 2);
+    mesh.add(pl);
   }
 
-  // Rapier dynamic body – heavy with zero bounciness, solid 'dead thud'
-  const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
-    .setTranslation(spawnX, spawnY, spawnZ)
-    .setLinearDamping(0.5)
-    .setAngularDamping(0.5);
-  const rigidBody = world.createRigidBody(bodyDesc);
+  // Floating label
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 40px monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(label), 32, 32);
+  const labelTex = new THREE.CanvasTexture(canvas);
+  const labelMat = new THREE.SpriteMaterial({ map: labelTex, transparent: true, opacity: 0.9 });
+  const sprite = new THREE.Sprite(labelMat);
+  sprite.scale.set(0.5, 0.5, 0.5);
+  sprite.position.y = trinketSize / 2 + 0.35;
+  mesh.add(sprite);
 
-  const colliderDesc = RAPIER.ColliderDesc.cuboid(
-    halfSize,
-    halfSize,
-    halfSize
-  )
+  altarTrinkets.push({ mesh, label, materialType });
+
+  // Entry animation
+  mesh.scale.set(0, 0, 0);
+  gsap.to(mesh.scale, { x: 1, y: 1, z: 1, duration: 0.5, ease: "back.out(2)" });
+
+  return mesh;
+}
+
+// ── Heavy Thud Audio ─────────────────────────────────────────────────
+function playThud() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = 55; // deep bass
+  gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.3);
+}
+
+// ── Camera Shake ─────────────────────────────────────────────────────
+function cameraShake(intensity = 0.15, duration = 0.2) {
+  const origPos = camera.position.clone();
+  const tl = gsap.timeline();
+  const steps = 6;
+  for (let i = 0; i < steps; i++) {
+    const factor = 1 - i / steps;
+    tl.to(camera.position, {
+      x: origPos.x + (Math.random() - 0.5) * intensity * factor,
+      y: origPos.y + (Math.random() - 0.5) * intensity * factor,
+      duration: duration / steps,
+      ease: "none",
+    });
+  }
+  tl.to(camera.position, { x: origPos.x, y: origPos.y, duration: 0.05 });
+}
+
+// ── Fusion Flash ─────────────────────────────────────────────────────
+function createFlash(position) {
+  const flashGeo = new THREE.SphereGeometry(2, 16, 16);
+  const flashMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 1.0,
+  });
+  const flash = new THREE.Mesh(flashGeo, flashMat);
+  flash.position.copy(position);
+  scene.add(flash);
+
+  gsap.to(flash.scale, { x: 4, y: 4, z: 4, duration: 0.4, ease: "power2.out" });
+  gsap.to(flashMat, {
+    opacity: 0,
+    duration: 0.6,
+    ease: "power2.out",
+    onComplete: () => {
+      scene.remove(flash);
+      flashGeo.dispose();
+      flashMat.dispose();
+    },
+  });
+}
+
+// ── #12 Cold Open Sequence ───────────────────────────────────────────
+function startColdOpen() {
+  // Spawn '1' trinket on altar at start
+  createTrinket(1, "mirror");
+
+  const dropCubes = [];
+  const baseY = STAGE_Y;
+
+  const tl = gsap.timeline({
+    onComplete: () => {
+      fuseCubes(dropCubes, baseY);
+    },
+  });
+
+  for (let i = 0; i < NUM_CUBES; i++) {
+    const geo = new THREE.BoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
+    const mat = getOrCreateMirrorMaterial().clone();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    const targetY = baseY + CUBE_SIZE / 2 + i * CUBE_SIZE;
+    const startY = 18; // ceiling area
+
+    mesh.position.set(0, startY, STAGE_Z);
+    scene.add(mesh);
+    dropCubes.push(mesh);
+
+    // Stagger each cube drop
+    tl.to(
+      mesh.position,
+      {
+        y: targetY,
+        duration: 0.35,
+        ease: "bounce.out",
+        onComplete: () => {
+          playThud();
+          cameraShake(0.05, 0.1);
+        },
+      },
+      i * 0.15
+    );
+  }
+}
+
+// ── Fusion: 12 cubes → 1 Composite Obelisk ──────────────────────────
+function fuseCubes(cubes, baseY) {
+  const centerY = baseY + (NUM_CUBES * CUBE_SIZE) / 2;
+  createFlash(new THREE.Vector3(0, centerY, STAGE_Z));
+  playThud();
+  cameraShake(0.3, 0.3);
+
+  // Remove individual cubes
+  gsap.delayedCall(0.2, () => {
+    for (const cube of cubes) {
+      scene.remove(cube);
+      cube.geometry.dispose();
+      if (cube.material !== mirrorMaterial) cube.material.dispose();
+    }
+
+    // Create composite obelisk
+    createCompositeObelisk(baseY);
+
+    // Spawn '12' composite trinket on altar
+    createTrinket(12, "composite");
+
+    coldOpenComplete = true;
+    lastInteractionTime = performance.now() / 1000;
+  });
+}
+
+// ── Composite Obelisk (12 units tall, segmented for folding) ─────────
+function createCompositeObelisk(baseY) {
+  obeliskGroup = new THREE.Group();
+  obeliskGroup.position.set(0, 0, STAGE_Z);
+  scene.add(obeliskGroup);
+
+  obeliskSegments = [];
+
+  // Create 12 unit segments
+  for (let i = 0; i < NUM_CUBES; i++) {
+    const geo = new THREE.BoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
+    const mat = createCompositeMaterial();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.position.set(0, baseY + CUBE_SIZE / 2 + i * CUBE_SIZE, 0);
+    obeliskGroup.add(mesh);
+
+    obeliskSegments.push({
+      mesh,
+      index: i,
+      heightStart: i,
+      heightEnd: i + 1,
+    });
+  }
+
+  // Anchor bottom segment as fixed Rapier body
+  const bottomSeg = obeliskSegments[0];
+  const bodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, baseY + CUBE_SIZE / 2, STAGE_Z);
+  const rb = world.createRigidBody(bodyDesc);
+  const cd = RAPIER.ColliderDesc.cuboid(CUBE_SIZE / 2, CUBE_SIZE / 2, CUBE_SIZE / 2)
     .setRestitution(0.0)
-    .setFriction(0.8)
-    .setDensity(10.0);
-  world.createCollider(colliderDesc, rigidBody);
+    .setFriction(0.8);
+  world.createCollider(cd, rb);
 
-  bodies.push({ mesh, rigidBody, pointLight });
+  // Create hinge points at heights 2, 3, 4, 6
+  createHingePoints(baseY);
+}
+
+// ── Hinge Point Markers ──────────────────────────────────────────────
+function createHingePoints(baseY) {
+  const hingeHeights = [2, 3, 4, 6];
+  hingePoints = [];
+
+  for (const h of hingeHeights) {
+    const hingeY = baseY + h * CUBE_SIZE;
+
+    // Visual marker — small glowing ring
+    const ringGeo = new THREE.TorusGeometry(0.7, 0.05, 8, 24);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0x00ff88,
+      transparent: true,
+      opacity: 0.6,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(0, hingeY, 0);
+    obeliskGroup.add(ring);
+
+    // Label
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#00ff88";
+    ctx.font = "bold 28px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("÷" + h, 32, 32);
+    const tex = new THREE.CanvasTexture(canvas);
+    const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.0 });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.scale.set(0.6, 0.6, 0.6);
+    sprite.position.set(1.2, hingeY, 0);
+    obeliskGroup.add(sprite);
+
+    hingePoints.push({
+      height: h,
+      hingeY,
+      ring,
+      label: sprite,
+      labelMat: spriteMat,
+      activated: false,
+      baseY,
+    });
+  }
+}
+
+// ── Breathing Hints (Idle Pulse) ─────────────────────────────────────
+function updateBreathingHints(elapsed) {
+  if (!coldOpenComplete || foldingActive || foldingComplete) return;
+
+  const timeSinceInteraction = elapsed - lastInteractionTime;
+
+  for (const hp of hingePoints) {
+    if (hp.activated) continue;
+
+    if (timeSinceInteraction > 3.0) {
+      // Pulse green light
+      const pulse = 0.4 + 0.3 * Math.sin(elapsed * 3.0);
+      hp.ring.material.opacity = pulse;
+      hp.labelMat.opacity = pulse * 0.8;
+    } else {
+      hp.ring.material.opacity = 0.3;
+      hp.labelMat.opacity = 0.0;
+    }
+  }
+}
+
+// ── Hinge Click Detection ────────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+
+function onPointerDown(event) {
+  if (!coldOpenComplete || foldingActive) return;
+
+  // Check for handle drag (unspooling)
+  if (foldingComplete && handleMesh) {
+    pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+    pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(handleMesh, true);
+    if (hits.length > 0) {
+      startUnspooling();
+      return;
+    }
+  }
+
+  // Check for hinge clicks
+  pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+
+  // Find next available hinge (in order: 6, 4, 3, 2)
+  const hingeOrder = [6, 4, 3, 2];
+  let nextHinge = null;
+  for (const h of hingeOrder) {
+    const hp = hingePoints.find((p) => p.height === h && !p.activated);
+    if (hp) {
+      nextHinge = hp;
+      break;
+    }
+  }
+
+  if (!nextHinge) return;
+
+  // Check if clicked near the hinge
+  const ringHits = raycaster.intersectObject(nextHinge.ring);
+  // Also check if clicked on obelisk segments
+  const segMeshes = obeliskSegments.map((s) => s.mesh);
+  const segHits = raycaster.intersectObjects(segMeshes);
+
+  if (ringHits.length > 0 || segHits.length > 0) {
+    lastInteractionTime = performance.now() / 1000;
+    activateHinge(nextHinge);
+  }
+}
+
+// ── Hinge Activation & Fold Animation ────────────────────────────────
+let handleMesh = null;
+const foldHistory = []; // for unspooling
+
+function activateHinge(hingePoint) {
+  if (foldingActive) return;
+  foldingActive = true;
+  hingePoint.activated = true;
+
+  const h = hingePoint.height;
+  const baseY = hingePoint.baseY;
+
+  // Hide the hinge ring
+  gsap.to(hingePoint.ring.material, { opacity: 0, duration: 0.3 });
+  gsap.to(hingePoint.labelMat, { opacity: 0, duration: 0.3 });
+
+  // Determine which segments are above the hinge
+  const segsAbove = obeliskSegments.filter((s) => s.mesh.position.y > baseY + h * CUBE_SIZE - 0.01);
+
+  // Create a pivot group for the fold
+  const pivotY = baseY + h * CUBE_SIZE;
+  const pivotGroup = new THREE.Group();
+  pivotGroup.position.set(0, pivotY, 0);
+  obeliskGroup.add(pivotGroup);
+
+  // Reparent segments above hinge into the pivot
+  for (const seg of segsAbove) {
+    const worldPos = new THREE.Vector3();
+    seg.mesh.getWorldPosition(worldPos);
+    obeliskGroup.remove(seg.mesh);
+    pivotGroup.add(seg.mesh);
+    // Adjust position relative to pivot
+    seg.mesh.position.set(worldPos.x - pivotGroup.position.x - obeliskGroup.position.x, worldPos.y - pivotGroup.position.y - obeliskGroup.position.y, worldPos.z - obeliskGroup.position.z);
+  }
+
+  // Determine fold direction based on hinge height
+  // Hinge at 6: CCW (negative rotation around X)
+  // Hinge at 4: CCW first, then CW together
+  // Hinge at 3: follows zig-zag
+  // Hinge at 2: follows zig-zag
+  const isCCWFold = [6, 3].includes(h); // zig-zag: 6 and 3 fold counter-clockwise
+  const rotationAngle = isCCWFold ? -Math.PI : Math.PI;
+
+  // Spawn factor trinket
+  const factorNum = h;
+  const matType = isPrime(factorNum) ? "prime" : factorNum === 1 ? "mirror" : "composite";
+  createTrinket(factorNum, matType);
+
+  // Animate the fold
+  const tl = gsap.timeline({
+    onComplete: () => {
+      // Reparent segments back
+      for (const seg of segsAbove) {
+        const worldPos = new THREE.Vector3();
+        seg.mesh.getWorldPosition(worldPos);
+        pivotGroup.remove(seg.mesh);
+        obeliskGroup.add(seg.mesh);
+        seg.mesh.position.set(
+          worldPos.x - obeliskGroup.position.x,
+          worldPos.y - obeliskGroup.position.y,
+          worldPos.z - obeliskGroup.position.z
+        );
+      }
+      obeliskGroup.remove(pivotGroup);
+
+      // Material transformation: if the hinge height is prime (2 or 3),
+      // transform the folded segments to Supernova material
+      if (isPrime(h)) {
+        transformToPrime(segsAbove);
+      }
+
+      // Record fold for unspooling
+      foldHistory.push({
+        hingePoint,
+        segsAbove: [...segsAbove],
+        rotationAngle,
+        pivotY,
+      });
+
+      foldingActive = false;
+
+      // Check if all hinges activated
+      if (hingePoints.every((hp) => hp.activated)) {
+        foldingComplete = true;
+        revealHandle();
+      }
+    },
+  });
+
+  tl.to(pivotGroup.rotation, {
+    x: rotationAngle,
+    duration: 0.8,
+    ease: "power2.inOut",
+    onComplete: () => {
+      playThud();
+      cameraShake(0.2, 0.25);
+    },
+  });
+}
+
+// ── Material Transformation to Supernova ─────────────────────────────
+function transformToPrime(segments) {
+  const reusableVec = new THREE.Vector3();
+  for (const seg of segments) {
+    const oldMat = seg.mesh.material;
+    seg.mesh.material = createPrimeMaterial();
+    primeShaderMeshes.push(seg.mesh);
+
+    // Add point light for glow
+    const pl = new THREE.PointLight(0xff6600, 15, 6, 2);
+    seg.mesh.add(pl);
+
+    // Flash effect
+    seg.mesh.getWorldPosition(reusableVec);
+    createFlash(reusableVec.clone());
+
+    if (oldMat.dispose) oldMat.dispose();
+  }
+}
+
+// ── Reveal Handle (after all folds complete) ─────────────────────────
+function revealHandle() {
+  // Find the topmost visible segment
+  let maxY = -Infinity;
+  let topSeg = null;
+  for (const seg of obeliskSegments) {
+    const worldPos = new THREE.Vector3();
+    seg.mesh.getWorldPosition(worldPos);
+    if (worldPos.y > maxY) {
+      maxY = worldPos.y;
+      topSeg = seg;
+    }
+  }
+
+  if (!topSeg) return;
+
+  // Create a handle on top
+  const handleGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.6, 12);
+  const handleMat = new THREE.MeshStandardMaterial({
+    color: 0x00ff88,
+    metalness: 0.9,
+    roughness: 0.1,
+    emissive: 0x004422,
+    emissiveIntensity: 0.5,
+  });
+  handleMesh = new THREE.Mesh(handleGeo, handleMat);
+  handleMesh.castShadow = true;
+
+  const worldPos = new THREE.Vector3();
+  topSeg.mesh.getWorldPosition(worldPos);
+  handleMesh.position.set(worldPos.x, worldPos.y + CUBE_SIZE / 2 + 0.3, worldPos.z);
+  scene.add(handleMesh);
+
+  // Breathing animation
+  gsap.to(handleMesh.scale, {
+    y: 1.2,
+    duration: 1.0,
+    repeat: -1,
+    yoyo: true,
+    ease: "sine.inOut",
+  });
+  gsap.to(handleMat, {
+    emissiveIntensity: 1.2,
+    duration: 1.0,
+    repeat: -1,
+    yoyo: true,
+    ease: "sine.inOut",
+  });
+
+  // Entry animation
+  handleMesh.scale.set(0, 0, 0);
+  gsap.to(handleMesh.scale, { x: 1, y: 1, z: 1, duration: 0.5, ease: "back.out(2)" });
+}
+
+// ── Unspooling (reverse folding) ─────────────────────────────────────
+function startUnspooling() {
+  if (foldHistory.length === 0 || foldingActive) return;
+  foldingActive = true;
+
+  // Remove handle
+  if (handleMesh) {
+    gsap.killTweensOf(handleMesh.scale);
+    gsap.killTweensOf(handleMesh.material);
+    scene.remove(handleMesh);
+    handleMesh.geometry.dispose();
+    handleMesh.material.dispose();
+    handleMesh = null;
+  }
+
+  const reverseTl = gsap.timeline({
+    onComplete: () => {
+      foldingActive = false;
+      foldingComplete = false;
+      // Reset hinge points
+      for (const hp of hingePoints) {
+        hp.activated = false;
+        hp.ring.material.opacity = 0.3;
+      }
+      lastInteractionTime = performance.now() / 1000;
+    },
+  });
+
+  // Reverse each fold in reverse order
+  const reversedHistory = [...foldHistory].reverse();
+  foldHistory.length = 0;
+
+  for (const record of reversedHistory) {
+    const { segsAbove, rotationAngle, pivotY } = record;
+
+    reverseTl.add(() => {
+      const pivotGroup = new THREE.Group();
+      pivotGroup.position.set(0, pivotY, 0);
+      obeliskGroup.add(pivotGroup);
+
+      for (const seg of segsAbove) {
+        const worldPos = new THREE.Vector3();
+        seg.mesh.getWorldPosition(worldPos);
+        obeliskGroup.remove(seg.mesh);
+        pivotGroup.add(seg.mesh);
+        seg.mesh.position.set(worldPos.x - pivotGroup.position.x - obeliskGroup.position.x, worldPos.y - pivotGroup.position.y - obeliskGroup.position.y, worldPos.z - obeliskGroup.position.z);
+      }
+
+      gsap.to(pivotGroup.rotation, {
+        x: -rotationAngle,
+        duration: 0.6,
+        ease: "power2.inOut",
+        onComplete: () => {
+          for (const seg of segsAbove) {
+            const wp = new THREE.Vector3();
+            seg.mesh.getWorldPosition(wp);
+            pivotGroup.remove(seg.mesh);
+            obeliskGroup.add(seg.mesh);
+            seg.mesh.position.set(
+              wp.x - obeliskGroup.position.x,
+              wp.y - obeliskGroup.position.y,
+              wp.z - obeliskGroup.position.z
+            );
+          }
+          obeliskGroup.remove(pivotGroup);
+          playThud();
+          cameraShake(0.1, 0.15);
+        },
+      });
+    });
+
+    reverseTl.add(() => {}, "+=0.7"); // spacing between reverse folds
+  }
 }
 
 // ── Sync & Render Loop ──────────────────────────────────────────────
@@ -591,6 +1116,9 @@ function loop() {
     mirrorCubeCamera.update(renderer, scene);
     mirrorMesh.visible = true;
   }
+
+  // Update breathing hints on idle hinges
+  updateBreathingHints(elapsed);
 
   renderer.render(scene, camera);
 }
