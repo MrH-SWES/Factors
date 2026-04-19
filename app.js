@@ -851,7 +851,6 @@ function activateHinge(hingePoint) {
 
   // Determine which segments are above the hinge
   const segsAbove = obeliskSegments.filter((s) => s.mesh.position.y > baseY + h * CUBE_SIZE - 0.01);
-  const numAbove = segsAbove.length;
 
   // Create a pivot group for the fold
   const pivotY = baseY + h * CUBE_SIZE;
@@ -866,7 +865,7 @@ function activateHinge(hingePoint) {
     obeliskGroup.remove(seg.mesh);
     pivotGroup.add(seg.mesh);
     // Adjust position relative to pivot
-    seg.mesh.position.set(0, worldPos.y - pivotGroup.position.y - obeliskGroup.position.y, worldPos.z - obeliskGroup.position.z);
+    seg.mesh.position.set(worldPos.x - pivotGroup.position.x - obeliskGroup.position.x, worldPos.y - pivotGroup.position.y - obeliskGroup.position.y, worldPos.z - obeliskGroup.position.z);
   }
 
   // Determine fold direction based on hinge height
@@ -874,8 +873,8 @@ function activateHinge(hingePoint) {
   // Hinge at 4: CCW first, then CW together
   // Hinge at 3: follows zig-zag
   // Hinge at 2: follows zig-zag
-  const isOddStep = [6, 3].includes(h); // odd hinges fold left (CCW)
-  const rotationAngle = isOddStep ? -Math.PI : Math.PI;
+  const isCCWFold = [6, 3].includes(h); // zig-zag: 6 and 3 fold counter-clockwise
+  const rotationAngle = isCCWFold ? -Math.PI : Math.PI;
 
   // Spawn factor trinket
   const factorNum = h;
@@ -899,8 +898,9 @@ function activateHinge(hingePoint) {
       }
       obeliskGroup.remove(pivotGroup);
 
-      // Material transformation for prime-valued segments
-      if (isPrime(numAbove)) {
+      // Material transformation: if the hinge height is prime (2 or 3),
+      // transform the folded segments to Supernova material
+      if (isPrime(h)) {
         transformToPrime(segsAbove);
       }
 
@@ -935,6 +935,7 @@ function activateHinge(hingePoint) {
 
 // ── Material Transformation to Supernova ─────────────────────────────
 function transformToPrime(segments) {
+  const reusableVec = new THREE.Vector3();
   for (const seg of segments) {
     const oldMat = seg.mesh.material;
     seg.mesh.material = createPrimeMaterial();
@@ -945,7 +946,8 @@ function transformToPrime(segments) {
     seg.mesh.add(pl);
 
     // Flash effect
-    createFlash(new THREE.Vector3().copy(seg.mesh.position).add(obeliskGroup.position));
+    seg.mesh.getWorldPosition(reusableVec);
+    createFlash(reusableVec.clone());
 
     if (oldMat.dispose) oldMat.dispose();
   }
@@ -1050,7 +1052,7 @@ function startUnspooling() {
         seg.mesh.getWorldPosition(worldPos);
         obeliskGroup.remove(seg.mesh);
         pivotGroup.add(seg.mesh);
-        seg.mesh.position.set(0, worldPos.y - pivotGroup.position.y - obeliskGroup.position.y, worldPos.z - obeliskGroup.position.z);
+        seg.mesh.position.set(worldPos.x - pivotGroup.position.x - obeliskGroup.position.x, worldPos.y - pivotGroup.position.y - obeliskGroup.position.y, worldPos.z - obeliskGroup.position.z);
       }
 
       gsap.to(pivotGroup.rotation, {
