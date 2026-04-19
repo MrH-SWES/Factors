@@ -1,5 +1,8 @@
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import RAPIER from "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.12.0/rapier.es.js";
+import * as THREE from "three";
+import RAPIER from "rapier";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 
 // ── Mobile Debugger ──────────────────────────────────────────────────
 window.onerror = function (msg, src, line, col, err) {
@@ -9,7 +12,9 @@ window.onerror = function (msg, src, line, col, err) {
 // ── Globals ──────────────────────────────────────────────────────────
 let scene, camera, renderer, world;
 let concreteTexture, concreteBumpTexture;
+let brushedMetalTexture;
 let mirrorCubeCamera, mirrorRenderTarget, mirrorMaterial;
+let composer, bloomPass;
 let mirrorMesh = null; // explicit reference to the '1' mirror block
 const bodies = []; // { mesh, rigidBody, pointLight? } pairs for sync
 const primeShaderMeshes = []; // meshes using supernova shader (need time uniform updates)
@@ -22,10 +27,21 @@ const ALTAR_Y = 2.5; // top of altar slab
 const CUBE_SIZE = 1;
 const NUM_CUBES = 12;
 
-let obeliskGroup = null;       // THREE.Group holding the composite obelisk segments
-let obeliskSegments = [];      // array of { mesh, heightStart, heightEnd }
+const PRIMEDEX_Z = 18;
+const PRIMEDEX_Y = 0.75;
+const PRIMEDEX_SLOT_SPACING = 1.3;
+const PRIMEDEX_LANDING_X = 0;
+const PRIMEDEX_DROP_HEIGHT = 3.2;
+
+let obeliskSegments = [];      // array of { mesh, rigidBody, index, heightStart, heightEnd }
+let obeliskJointByHeight = new Map();
+let obeliskAnchorJoint = null;
+let obeliskGroup = null;
 let hingePoints = [];          // interactive hinge point objects
 let altarTrinkets = [];        // trinkets placed on the altar
+let primeDexGroup = null;
+let primeDexBody = null;
+let primeDexWells = [];
 let coldOpenComplete = false;
 let foldingActive = false;
 let foldingComplete = false;
@@ -114,24 +130,50 @@ function isPrime(n) {
   return true;
 }
 
-// ── Procedural Concrete Texture ──────────────────────────────────────
-function createConcreteTexture(size = 512) {
+// ── Procedural Concrete Texture (Formwork Panels & Tie Holes) ────────
+function createConcreteTexture(size = 1024) {
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d");
-  const imageData = ctx.createImageData(size, size);
-  const data = imageData.data;
 
-  for (let i = 0; i < size * size; i++) {
-    const v = 90 + Math.random() * 50; // temperature-neutral grayscale 90–140
-    data[i * 4] = v;
-    data[i * 4 + 1] = v;
-    data[i * 4 + 2] = v;
-    data[i * 4 + 3] = 255;
+  // Base: warm-neutral concrete fill
+  ctx.fillStyle = "#6b6560";
+  ctx.fillRect(0, 0, size, size);
+
+  // Fine aggregate grain
+  const imgData = ctx.getImageData(0, 0, size, size);
+  const d = imgData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (Math.random() - 0.5) * 18;
+    d[i] += n; d[i + 1] += n; d[i + 2] += n;
   }
+  ctx.putImageData(imgData, 0, 0);
 
-  ctx.putImageData(imageData, 0, 0);
+  // Formwork panel grid
+  const panelW = size / 4;
+  const panelH = size / 3;
+  ctx.strokeStyle = "rgba(0,0,0,0.18)";
+  ctx.lineWidth = 2;
+  for (let px = 0; px < 4; px++) {
+    for (let py = 0; py < 3; py++) {
+      const x = px * panelW;
+      const y = py * panelH;
+      ctx.strokeRect(x + 1, y + 1, panelW - 2, panelH - 2);
+
+      // 4 tie holes per panel
+      ctx.fillStyle = "rgba(20,18,16,0.55)";
+      const inset = 18;
+      const holeR = 4;
+      const cxs = [x + inset, x + panelW - inset, x + inset, x + panelW - inset];
+      const cys = [y + inset, y + inset, y + panelH - inset, y + panelH - inset];
+      for (let h = 0; h < 4; h++) {
+        ctx.beginPath();
+        ctx.arc(cxs[h], cys[h], holeR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
@@ -140,28 +182,85 @@ function createConcreteTexture(size = 512) {
   return texture;
 }
 
-function createConcreteBumpTexture(size = 512) {
+function createConcreteBumpTexture(size = 1024) {
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d");
-  const imageData = ctx.createImageData(size, size);
-  const data = imageData.data;
 
-  for (let i = 0; i < size * size; i++) {
-    const v = Math.random() * 255; // full-range noise for visible grain
-    data[i * 4] = v;
-    data[i * 4 + 1] = v;
-    data[i * 4 + 2] = v;
-    data[i * 4 + 3] = 255;
+  // Mid-gray base for bump neutrality
+  ctx.fillStyle = "#808080";
+  ctx.fillRect(0, 0, size, size);
+
+  // Aggregate grain bump noise
+  const imgData = ctx.getImageData(0, 0, size, size);
+  const d = imgData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (Math.random() - 0.5) * 60;
+    d[i] += n; d[i + 1] += n; d[i + 2] += n;
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  // Panel seams as raised ridges
+  const panelW = size / 4;
+  const panelH = size / 3;
+  ctx.strokeStyle = "rgba(255,255,255,0.3)";
+  ctx.lineWidth = 3;
+  for (let px = 0; px < 4; px++) {
+    for (let py = 0; py < 3; py++) {
+      ctx.strokeRect(px * panelW + 1, py * panelH + 1, panelW - 2, panelH - 2);
+    }
   }
 
-  ctx.putImageData(imageData, 0, 0);
+  // Tie-hole depressions
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  for (let px = 0; px < 4; px++) {
+    for (let py = 0; py < 3; py++) {
+      const x = px * panelW;
+      const y = py * panelH;
+      const inset = 18;
+      const cxs = [x + inset, x + panelW - inset, x + inset, x + panelW - inset];
+      const cys = [y + inset, y + inset, y + panelH - inset, y + panelH - inset];
+      for (let h = 0; h < 4; h++) {
+        ctx.beginPath();
+        ctx.arc(cxs[h], cys[h], 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(4, 4);
+  return texture;
+}
+
+function createBrushedMetalTexture(size = 512) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+
+  // Solid neutral base
+  ctx.fillStyle = "#d0d0d0";
+  ctx.fillRect(0, 0, size, size);
+
+  // Very faint horizontal brush lines — geometry relies on envMap + spotlights
+  ctx.strokeStyle = "rgba(0,0,0,0.05)";
+  ctx.lineWidth = 1;
+  for (let y = 0; y < size; y += 2) {
+    if (Math.random() > 0.35) continue; // sparse lines
+    ctx.beginPath();
+    ctx.moveTo(0, y + Math.random());
+    ctx.lineTo(size, y + Math.random());
+    ctx.stroke();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(8, 1);
   return texture;
 }
 
@@ -200,7 +299,7 @@ function createPrimeMaterial() {
         float combinedNoise = (noise1 + noise2 * 0.5) * 0.67;
 
         // White-hot center → orange-red energy cloud
-        vec3 whiteHot = vec3(1.0, 1.0, 0.95);
+        vec3 whiteHot = vec3(1.0, 1.0, 1.0);
         vec3 orange = vec3(1.0, 0.45, 0.05);
         vec3 deepRed = vec3(0.6, 0.05, 0.0);
 
@@ -213,11 +312,15 @@ function createPrimeMaterial() {
           color = mix(orange, deepRed, (t - 0.3) / 0.7);
         }
 
+        float core = smoothstep(0.45, 0.0, dist);
+        color += whiteHot * core * 1.6;
+
         // Emissive glow intensity
         float glow = max(0.0, 1.0 - dist) * 2.0 + combinedNoise * 0.3;
         color *= (1.0 + glow);
 
-        gl_FragColor = vec4(color, 1.0);
+        // Multiply by 4.0 to breach the Bloom Threshold and create pure energy
+        gl_FragColor = vec4(color * 4.0, 1.0);
       }
     `,
   });
@@ -228,29 +331,23 @@ const compositeScreenSize = { w: window.innerWidth, h: window.innerHeight };
 
 function createCompositeMaterial() {
   const mat = new THREE.MeshStandardMaterial({
-    color: 0xc8c8c8,
-    metalness: 0.8,
-    roughness: 0.4,
-    envMap: mirrorRenderTarget.texture,
+    color: 0xc8ccd0,
+    metalness: 0.55,
+    roughness: 0.45,
+    map: brushedMetalTexture,
   });
 
-  // Triple-layer logic via onBeforeCompile:
-  // bright specular highlight top-left, subtle shadow bottom-right
+  // "Bead" highlight logic — normal-based so it stays locked to each block's
+  // physical surface regardless of camera angle.
   mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uScreenSize = { value: new THREE.Vector2(compositeScreenSize.w, compositeScreenSize.h) };
-    shader.fragmentShader = 'uniform vec2 uScreenSize;\n' + shader.fragmentShader;
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <output_fragment>',
-      `
-      #include <output_fragment>
-
-      // Triple-Layer: specular highlight (top-left) and shadow (bottom-right)
-      vec2 screenUV = gl_FragCoord.xy / uScreenSize;
-      float highlightFactor = smoothstep(0.3, 0.9, 1.0 - length(screenUV - vec2(0.2, 0.8)));
-      float shadowFactor = smoothstep(0.3, 0.9, 1.0 - length(screenUV - vec2(0.8, 0.2)));
-      gl_FragColor.rgb += vec3(0.15) * highlightFactor;
-      gl_FragColor.rgb -= vec3(0.08) * shadowFactor;
-      `
+      `#include <output_fragment>
+       vec3 viewNormal = normalize(vNormal);
+       float highlight = smoothstep(0.5, 1.0, dot(viewNormal, normalize(vec3(-1.0, 1.0, 1.0))));
+       float shadow = smoothstep(0.5, 1.0, dot(viewNormal, normalize(vec3(1.0, -1.0, -1.0))));
+       gl_FragColor.rgb += vec3(0.15) * highlight;
+       gl_FragColor.rgb -= vec3(0.08) * shadow;`
     );
   };
 
@@ -262,10 +359,15 @@ function getOrCreateMirrorMaterial() {
   if (mirrorMaterial) return mirrorMaterial;
 
   // Render target and cube camera are created in init(); just build the material
-  mirrorMaterial = new THREE.MeshStandardMaterial({
-    envMap: mirrorRenderTarget.texture,
+  mirrorMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff,
+    transmission: 0.9,
+    opacity: 1,
     metalness: 1.0,
     roughness: 0.0,
+    ior: 1.5,
+    thickness: 1.2,
+    envMap: mirrorRenderTarget.texture,
   });
   return mirrorMaterial;
 }
@@ -280,12 +382,13 @@ async function init() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a0a0a);
 
-  // Volumetric 'Dust' — dusty cavern feel
-  scene.fog = new THREE.FogExp2(0x000000, 0.015);
+  // Volumetric 'Dust' — dusty cavern feel (dark gray lets light cones glow in air)
+  scene.fog = new THREE.FogExp2(0x0a0a0a, 0.015);
 
   // Generate shared concrete textures
   concreteTexture = createConcreteTexture();
   concreteBumpTexture = createConcreteBumpTexture();
+  brushedMetalTexture = createBrushedMetalTexture();
 
   // 3. Camera — low-angle, monumental perspective
   camera = new THREE.PerspectiveCamera(
@@ -294,8 +397,8 @@ async function init() {
     0.1,
     200
   );
-  camera.position.set(0, 6, 25);
-  camera.lookAt(0, 2, 0);
+  camera.position.set(0, 4.5, 22);
+  camera.lookAt(0, 3, -5);
 
   // 4. Renderer with shadows
   renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -304,8 +407,20 @@ async function init() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.2;
+  renderer.toneMappingExposure = 0.85;
   document.body.appendChild(renderer.domElement);
+
+  try {
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    // High threshold keeps bloom focused on only the hottest prime core values.
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.45, 3.0);
+    composer.addPass(bloomPass);
+  } catch (err) {
+    console.warn("Post-processing unavailable, using direct renderer:", err);
+    composer = null;
+    bloomPass = null;
+  }
 
   // 5. Shared CubeCamera / RenderTarget (used by mirror '1' and composite envMaps)
   mirrorRenderTarget = new THREE.WebGLCubeRenderTarget(256, {
@@ -315,44 +430,76 @@ async function init() {
   mirrorCubeCamera = new THREE.CubeCamera(0.1, 100, mirrorRenderTarget);
   scene.add(mirrorCubeCamera);
 
-  // 6. Lighting — No ambient light. Two spotlights only.
-  // Primary SpotLight hitting the Altar
-  const altarSpot = new THREE.SpotLight(0xffffff, 500);
-  altarSpot.position.set(5, 12, 10);
+  // 6. Lighting ──────────────────────────────────────────────────────────
+  // A. Ambient Fill (Dim conference room baseline)
+  const ambient = new THREE.HemisphereLight(0x3a4050, 0x111111, 0.25);
+  scene.add(ambient);
+
+  // B. Diffuse Altar Light (Second most well-lit, extremely soft)
+  const altarSpot = new THREE.SpotLight(0xffffff, 80);
+  altarSpot.position.set(0, 8, 14);
   altarSpot.target.position.set(0, 1, 14);
   altarSpot.angle = Math.PI / 4;
-  altarSpot.penumbra = 0.9;
-  altarSpot.decay = 1.0;
-  altarSpot.distance = 100;
+  altarSpot.penumbra = 1.0;
+  altarSpot.decay = 2.0;
   altarSpot.castShadow = true;
-  altarSpot.shadow.mapSize.width = 1024;
-  altarSpot.shadow.mapSize.height = 1024;
-  altarSpot.shadow.camera.near = 1;
-  altarSpot.shadow.camera.far = 50;
-  altarSpot.shadow.bias = -0.001;
   scene.add(altarSpot);
   scene.add(altarSpot.target);
 
-  // Secondary SpotLight hitting the background stage
-  const stageSpot = new THREE.SpotLight(0xffffff, 200);
-  stageSpot.position.set(0, 15, -28);
-  stageSpot.target.position.set(0, 0, -10);
-  stageSpot.angle = Math.PI / 5;
-  stageSpot.penumbra = 0.8;
-  stageSpot.decay = 1.5;
-  stageSpot.distance = 60;
-  stageSpot.castShadow = true;
-  stageSpot.shadow.mapSize.width = 1024;
-  stageSpot.shadow.mapSize.height = 1024;
-  stageSpot.shadow.camera.near = 1;
-  stageSpot.shadow.camera.far = 50;
-  stageSpot.shadow.bias = -0.001;
-  scene.add(stageSpot);
-  scene.add(stageSpot.target);
+  // C. 3-Point Obelisk Lighting (Angled down to highlight the artifact)
+  const obeliskTarget = new THREE.Object3D();
+  obeliskTarget.position.set(0, 4, STAGE_Z);
+  scene.add(obeliskTarget);
+
+  // Top-front angled down
+  const spotFrontTop = new THREE.SpotLight(0xffffff, 120);
+  spotFrontTop.position.set(0, 15, STAGE_Z + 6);
+  spotFrontTop.target = obeliskTarget;
+  spotFrontTop.angle = 0.5;
+  spotFrontTop.penumbra = 0.6;
+  spotFrontTop.decay = 2.0;
+  spotFrontTop.castShadow = true;
+  scene.add(spotFrontTop);
+
+  // Left 45-degree
+  const spotLeft = new THREE.SpotLight(0xffffff, 80);
+  spotLeft.position.set(-8, 12, STAGE_Z + 4);
+  spotLeft.target = obeliskTarget;
+  spotLeft.angle = 0.5;
+  spotLeft.penumbra = 0.6;
+  spotLeft.decay = 2.0;
+  spotLeft.castShadow = true;
+  scene.add(spotLeft);
+
+  // Right 45-degree
+  const spotRight = new THREE.SpotLight(0xffffff, 80);
+  spotRight.position.set(8, 12, STAGE_Z + 4);
+  spotRight.target = obeliskTarget;
+  spotRight.angle = 0.5;
+  spotRight.penumbra = 0.6;
+  spotRight.decay = 2.0;
+  spotRight.castShadow = true;
+  scene.add(spotRight);
+
+  // D. Back Wall Downlights (Architectural depth)
+  const downlightDefs = [ { x: -6 }, { x: 0 }, { x: 6 } ];
+  for (const dl of downlightDefs) {
+    const spot = new THREE.SpotLight(0xf5e6d0, 90);
+    spot.position.set(dl.x, 9, -29);
+    spot.target.position.set(dl.x, 0, -30);
+    spot.angle = 0.35;
+    spot.penumbra = 0.5;
+    spot.decay = 2.0;
+    spot.castShadow = false;
+    scene.add(spot);
+    scene.add(spot.target);
+  }
 
   // 6. Room, Altar & Cold Open
   createRoom();
   createAltar();
+
+  // 6b. Dust system removed — clear air for the vault
 
   // 7. Events (pointerdown for mobile touch support)
   window.addEventListener("pointerdown", onPointerDown);
@@ -368,24 +515,34 @@ async function init() {
 // ── Room (Brutalist Concrete) ────────────────────────────────────────
 function createRoom() {
   const wallMat = new THREE.MeshStandardMaterial({
-    color: 0x1a1a1a,
-    roughness: 0.92,
+    color: 0x4a4a4a,
+    roughness: 0.88,
     metalness: 0.0,
     map: concreteTexture,
     bumpMap: concreteBumpTexture,
-    bumpScale: 0.1,
+    bumpScale: 0.8,
   });
 
-  const roomW = 30; // width  (x)
+  // Matte poured-concrete floor — darker and smoother than walls
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: 0x2a2a2a,
+    roughness: 0.92,
+    metalness: 0.02,
+    map: concreteTexture,
+    bumpMap: concreteBumpTexture,
+    bumpScale: 0.4,
+  });
+
+  const roomW = 800; // width (x) — vast horizon for 144-obelisk chain
   const roomH = 20; // height (y)
   const roomD = 61; // depth  (z) — larger to accommodate z:14 altar and z:-10 stage
   const thick = 1;  // wall thickness
   const roomZCenter = 0; // room centered at z=0
 
   // Helper: create a static box with mesh + Rapier collider
-  function addStaticBox(w, h, d, px, py, pz) {
+  function addStaticBox(w, h, d, px, py, pz, mat) {
     const geo = new THREE.BoxGeometry(w, h, d);
-    const mesh = new THREE.Mesh(geo, wallMat);
+    const mesh = new THREE.Mesh(geo, mat || wallMat);
     mesh.receiveShadow = true;
     mesh.castShadow = false;
     mesh.position.set(px, py, pz);
@@ -399,8 +556,8 @@ function createRoom() {
     world.createCollider(cd, rb);
   }
 
-  // Floor
-  addStaticBox(roomW, thick, roomD, 0, -thick / 2, roomZCenter);
+  // Floor (glossy sealed concrete for specular pooling)
+  addStaticBox(roomW, thick, roomD, 0, -thick / 2, roomZCenter, floorMat);
 
   // Ceiling
   addStaticBox(roomW, thick, roomD, 0, roomH + thick / 2, roomZCenter);
@@ -408,52 +565,57 @@ function createRoom() {
   // Back Wall
   addStaticBox(roomW, roomH, thick, 0, roomH / 2, roomZCenter - roomD / 2 + thick / 2);
 
-  // Left Wall
-  addStaticBox(thick, roomH, roomD, -roomW / 2 + thick / 2, roomH / 2, roomZCenter);
+  // Side walls removed — infinite vault horizon
 
-  // Right Wall
-  addStaticBox(thick, roomH, roomD, roomW / 2 - thick / 2, roomH / 2, roomZCenter);
-
-  // Stage — thin cylinder at z: -10
-  const stageRadius = 4;
-  const stageHeight = 0.2;
-  const stageGeo = new THREE.CylinderGeometry(stageRadius, stageRadius, stageHeight, 48);
+  // Stage — wider cylinder at z: -10 so obelisk shadow lands on it
+  const stageRadius = 6;
+  const stageHeight = 0.25;
+  const stageGeo = new THREE.CylinderGeometry(stageRadius, stageRadius, stageHeight, 64);
   const stageMesh = new THREE.Mesh(stageGeo, wallMat);
   stageMesh.receiveShadow = true;
   stageMesh.castShadow = true;
-  stageMesh.position.set(0, stageHeight / 2, -10);
+  stageMesh.position.set(0, stageHeight / 2, STAGE_Z);
   scene.add(stageMesh);
 
   // Rapier collider for the stage cylinder
-  const stageBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, stageHeight / 2, -10);
+  const stageBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, stageHeight / 2, STAGE_Z);
   const stageRb = world.createRigidBody(stageBodyDesc);
   const stageCd = RAPIER.ColliderDesc.cylinder(stageHeight / 2, stageRadius)
     .setRestitution(0.0)
     .setFriction(0.8);
   world.createCollider(stageCd, stageRb);
+
+  // Wall wash lights replaced by back-wall downlights in init()
 }
 
 // ── Altar Table (slab on pedestal, foreground at z: 14) ──────────────
 function createAltar() {
 
   const altarMat = new THREE.MeshStandardMaterial({
-    color: 0x1e1e1e,
-    roughness: 0.95,
+    color: 0x151618,
+    roughness: 1.0,
     metalness: 0.0,
-    map: concreteTexture,
     bumpMap: concreteBumpTexture,
-    bumpScale: 0.1,
+    bumpScale: 0.015,
   });
 
   const pz = 14; // foreground altar position
 
-  // Pedestal — slightly narrower base
-  const pedW = 6;
-  const pedH = 1;
-  const pedD = 3;
+  // Pedestal — tapered heavy stone pillar
+  const pedWTop = 1.4;
+  const pedWBot = 1.9;
+  const pedH = 1.15;
+  const pedD = 1.4;
   const pedY = pedH / 2;
 
-  const pedGeo = new THREE.BoxGeometry(pedW, pedH, pedD);
+  const pedShape = new THREE.Shape();
+  pedShape.moveTo(-pedWBot / 2, 0);
+  pedShape.lineTo(pedWBot / 2, 0);
+  pedShape.lineTo(pedWTop / 2, pedH);
+  pedShape.lineTo(-pedWTop / 2, pedH);
+  pedShape.closePath();
+  const pedGeo = new THREE.ExtrudeGeometry(pedShape, { depth: pedD, bevelEnabled: false });
+  pedGeo.translate(0, 0, -pedD / 2);
   const pedMesh = new THREE.Mesh(pedGeo, altarMat);
   pedMesh.receiveShadow = true;
   pedMesh.castShadow = true;
@@ -462,15 +624,15 @@ function createAltar() {
 
   const pedBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, pedY, pz);
   const pedRb = world.createRigidBody(pedBodyDesc);
-  const pedCd = RAPIER.ColliderDesc.cuboid(pedW / 2, pedH / 2, pedD / 2)
+  const pedCd = RAPIER.ColliderDesc.cuboid(pedWBot / 2, pedH / 2, pedD / 2)
     .setRestitution(0.0)
     .setFriction(0.8);
   world.createCollider(pedCd, pedRb);
 
   // Slab — thick stone slab on top of the pedestal
-  const slabW = 8;
+  const slabW = 7.2;
   const slabH = 1.5;
-  const slabD = 4;
+  const slabD = 0.8;
   const slabY = pedH + slabH / 2;
 
   const slabGeo = new THREE.BoxGeometry(slabW, slabH, slabD);
@@ -486,6 +648,141 @@ function createAltar() {
     .setRestitution(0.0)
     .setFriction(0.8);
   world.createCollider(slabCd, slabRb);
+
+  createPrimeDex();
+}
+
+// ── PrimeDex (sliding slab with recessed wells 1–12) ────────────────
+function createPrimeDex() {
+  const slabW = PRIMEDEX_SLOT_SPACING * (NUM_CUBES + 1);
+  const slabH = 1.1;
+  const slabD = 4.4;
+  const wellRadius = 0.42;
+  const wellDepth = 0.72;
+  const wallThickness = 0.08;
+  const topY = slabH / 2;
+  const wellBottomY = topY - wellDepth;
+
+  primeDexGroup = new THREE.Group();
+  primeDexGroup.position.set(0, PRIMEDEX_Y, PRIMEDEX_Z);
+  scene.add(primeDexGroup);
+
+  const slabMat = new THREE.MeshStandardMaterial({
+    color: 0x202020,
+    roughness: 0.96,
+    metalness: 0.02,
+    map: concreteTexture,
+    bumpMap: concreteBumpTexture,
+    bumpScale: 0.08,
+  });
+
+  const slabGeo = new THREE.BoxGeometry(slabW, slabH, slabD);
+  const slabMesh = new THREE.Mesh(slabGeo, slabMat);
+  slabMesh.castShadow = true;
+  slabMesh.receiveShadow = true;
+  primeDexGroup.add(slabMesh);
+
+  const zoneGeo = new THREE.RingGeometry(0.5, 0.75, 40);
+  const zoneMat = new THREE.MeshBasicMaterial({
+    color: 0xbdd7cc,
+    transparent: true,
+    opacity: 0.35,
+    side: THREE.DoubleSide,
+  });
+  const zoneMesh = new THREE.Mesh(zoneGeo, zoneMat);
+  zoneMesh.position.set(PRIMEDEX_LANDING_X, PRIMEDEX_Y + topY + 0.03, PRIMEDEX_Z);
+  zoneMesh.rotation.x = -Math.PI / 2;
+  scene.add(zoneMesh);
+
+  const dexBodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, PRIMEDEX_Y, PRIMEDEX_Z);
+  primeDexBody = world.createRigidBody(dexBodyDesc);
+  primeDexWells = [];
+
+  const baseCd = RAPIER.ColliderDesc.cuboid(slabW / 2, 0.2, slabD / 2).setTranslation(0, wellBottomY - 0.24, 0);
+  world.createCollider(baseCd, primeDexBody);
+
+  for (let i = 1; i <= NUM_CUBES; i++) {
+    const localX = (i - (NUM_CUBES + 1) / 2) * PRIMEDEX_SLOT_SPACING;
+
+    const ringGeo = new THREE.CylinderGeometry(wellRadius + 0.06, wellRadius + 0.06, 0.1, 28, 1, true);
+    const ringMat = new THREE.MeshStandardMaterial({
+      color: 0x2a2a2a,
+      roughness: 0.85,
+      metalness: 0.05,
+    });
+    const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+    ringMesh.position.set(localX, topY - 0.06, 0);
+    ringMesh.castShadow = true;
+    ringMesh.receiveShadow = true;
+    primeDexGroup.add(ringMesh);
+
+    const cavityGeo = new THREE.CylinderGeometry(wellRadius, wellRadius, wellDepth, 28);
+    const cavityMat = new THREE.MeshStandardMaterial({
+      color: 0x0a0a0a,
+      roughness: 1.0,
+      metalness: 0.0,
+    });
+    const cavityMesh = new THREE.Mesh(cavityGeo, cavityMat);
+    cavityMesh.position.set(localX, wellBottomY + wellDepth / 2, 0);
+    cavityMesh.receiveShadow = true;
+    primeDexGroup.add(cavityMesh);
+
+    // Four thin walls + base plate approximate a recessed capture well.
+    const wallHalf = wellRadius + wallThickness / 2;
+    const wallHeight = wellDepth / 2;
+    world.createCollider(RAPIER.ColliderDesc.cuboid(wallThickness / 2, wallHeight, wellRadius).setTranslation(localX - wallHalf, wellBottomY + wallHeight, 0), primeDexBody);
+    world.createCollider(RAPIER.ColliderDesc.cuboid(wallThickness / 2, wallHeight, wellRadius).setTranslation(localX + wallHalf, wellBottomY + wallHeight, 0), primeDexBody);
+    world.createCollider(RAPIER.ColliderDesc.cuboid(wellRadius, wallHeight, wallThickness / 2).setTranslation(localX, wellBottomY + wallHeight, -wallHalf), primeDexBody);
+    world.createCollider(RAPIER.ColliderDesc.cuboid(wellRadius, wallHeight, wallThickness / 2).setTranslation(localX, wellBottomY + wallHeight, wallHalf), primeDexBody);
+    world.createCollider(RAPIER.ColliderDesc.cuboid(wellRadius * 0.95, 0.06, wellRadius * 0.95).setTranslation(localX, wellBottomY + 0.06, 0), primeDexBody);
+
+    primeDexWells.push({
+      index: i,
+      localX,
+      localY: wellBottomY + 0.24,
+      localZ: 0,
+    });
+  }
+}
+
+function autoSlideDex(targetIndex) {
+  if (!primeDexGroup || !primeDexBody || primeDexWells.length === 0) {
+    return Promise.resolve();
+  }
+
+  const clamped = Math.max(1, Math.min(NUM_CUBES, targetIndex));
+  const targetWell = primeDexWells[clamped - 1];
+  const targetX = PRIMEDEX_LANDING_X - targetWell.localX;
+
+  playMechanicalSlide();
+
+  return new Promise((resolve) => {
+    gsap.to(primeDexGroup.position, {
+      x: targetX,
+      duration: 0.85,
+      ease: "power3.inOut",
+      onUpdate: () => {
+        primeDexBody.setNextKinematicTranslation({
+          x: primeDexGroup.position.x,
+          y: PRIMEDEX_Y,
+          z: PRIMEDEX_Z,
+        });
+      },
+      onComplete: () => {
+        primeDexBody.setNextKinematicTranslation({ x: targetX, y: PRIMEDEX_Y, z: PRIMEDEX_Z });
+        resolve();
+      },
+    });
+  });
+}
+
+function getLandingDropTarget() {
+  const centeredWell = primeDexWells.find((w) => Math.abs(primeDexGroup.position.x + w.localX - PRIMEDEX_LANDING_X) < 0.01) || primeDexWells[0];
+  return {
+    x: PRIMEDEX_LANDING_X,
+    y: PRIMEDEX_Y + centeredWell.localY,
+    z: PRIMEDEX_Z + centeredWell.localZ,
+  };
 }
 
 // ── Primary Obelisk — replaced by Cold Open sequence ─────────────────
@@ -547,19 +844,55 @@ function createTrinket(label, materialType) {
 
 // ── Heavy Thud Audio ─────────────────────────────────────────────────
 function playThud() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
   osc.type = "sine";
   osc.frequency.value = 55; // deep bass
-  gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+  gain.gain.setValueAtTime(0.4, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
   osc.connect(gain);
-  gain.connect(audioCtx.destination);
+  gain.connect(ctx.destination);
   osc.start();
-  osc.stop(audioCtx.currentTime + 0.3);
+  osc.stop(ctx.currentTime + 0.3);
+}
+
+function playMechanicalSlide() {
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+
+  const osc = ctx.createOscillator();
+  const filter = ctx.createBiquadFilter();
+  const gain = ctx.createGain();
+
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(180, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(95, ctx.currentTime + 0.34);
+
+  filter.type = "bandpass";
+  filter.frequency.setValueAtTime(720, ctx.currentTime);
+  filter.Q.value = 0.9;
+
+  gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.04, ctx.currentTime + 0.04);
+  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.36);
+
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.38);
+}
+
+function ensureAudioContext() {
+  if (!audioCtx) {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+    audioCtx = new Ctor();
+  }
+  return audioCtx;
 }
 
 // ── Camera Shake ─────────────────────────────────────────────────────
@@ -677,38 +1010,81 @@ function fuseCubes(cubes, baseY) {
 
 // ── Composite Obelisk (12 units tall, segmented for folding) ─────────
 function createCompositeObelisk(baseY) {
-  obeliskGroup = new THREE.Group();
-  obeliskGroup.position.set(0, 0, STAGE_Z);
-  scene.add(obeliskGroup);
-
+  obeliskGroup = null;
   obeliskSegments = [];
+  obeliskJointByHeight = new Map();
+  obeliskAnchorJoint = null;
 
-  // Create 12 unit segments
+  const anchorDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, baseY, STAGE_Z);
+  const anchorBody = world.createRigidBody(anchorDesc);
+
+  // Each segment is a standalone dynamic rigid body.
   for (let i = 0; i < NUM_CUBES; i++) {
     const geo = new THREE.BoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
     const mat = createCompositeMaterial();
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    mesh.position.set(0, baseY + CUBE_SIZE / 2 + i * CUBE_SIZE, 0);
-    obeliskGroup.add(mesh);
+
+    const y = baseY + CUBE_SIZE / 2 + i * CUBE_SIZE;
+    mesh.position.set(0, y, STAGE_Z);
+    scene.add(mesh);
+
+    const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
+      .setTranslation(0, y, STAGE_Z)
+      .setLinearDamping(0.55)
+      .setAngularDamping(0.75);
+    const rigidBody = world.createRigidBody(bodyDesc);
+
+    const cd = RAPIER.ColliderDesc.cuboid(CUBE_SIZE / 2, CUBE_SIZE / 2, CUBE_SIZE / 2)
+      .setRestitution(0.0)
+      .setFriction(0.9)
+      .setDensity(1.4);
+    world.createCollider(cd, rigidBody);
+
+    bodies.push({ mesh, rigidBody });
 
     obeliskSegments.push({
       mesh,
+      rigidBody,
       index: i,
       heightStart: i,
       heightEnd: i + 1,
     });
   }
 
-  // Anchor bottom segment as fixed Rapier body
-  const bottomSeg = obeliskSegments[0];
-  const bodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, baseY + CUBE_SIZE / 2, STAGE_Z);
-  const rb = world.createRigidBody(bodyDesc);
-  const cd = RAPIER.ColliderDesc.cuboid(CUBE_SIZE / 2, CUBE_SIZE / 2, CUBE_SIZE / 2)
-    .setRestitution(0.0)
-    .setFriction(0.8);
-  world.createCollider(cd, rb);
+  // Anchor the bottom segment to preserve the tower's staged posture.
+  const anchorJointData = RAPIER.JointData.revolute(
+    { x: 0, y: 0, z: 0 },
+    { x: 0, y: -CUBE_SIZE / 2, z: 0 },
+    { x: 1, y: 0, z: 0 }
+  );
+  obeliskAnchorJoint = world.createImpulseJoint(anchorJointData, anchorBody, obeliskSegments[0].rigidBody, true);
+  if (obeliskAnchorJoint.setLimits) {
+    obeliskAnchorJoint.setLimits(0, 0);
+  }
+  if (obeliskAnchorJoint.configureMotorPosition) {
+    obeliskAnchorJoint.configureMotorPosition(0, 70, 8);
+  }
+
+  // Joint each neighboring segment with a locked revolute hinge.
+  for (let i = 0; i < obeliskSegments.length - 1; i++) {
+    const lower = obeliskSegments[i];
+    const upper = obeliskSegments[i + 1];
+    const jointData = RAPIER.JointData.revolute(
+      { x: 0, y: CUBE_SIZE / 2, z: 0 },
+      { x: 0, y: -CUBE_SIZE / 2, z: 0 },
+      { x: 1, y: 0, z: 0 }
+    );
+    const joint = world.createImpulseJoint(jointData, lower.rigidBody, upper.rigidBody, true);
+    if (joint.setLimits) {
+      joint.setLimits(0, 0);
+    }
+    if (joint.configureMotorPosition) {
+      joint.configureMotorPosition(0, 90, 10);
+    }
+    obeliskJointByHeight.set(i + 1, joint);
+  }
 
   // Create hinge points at heights 2, 3, 4, 6
   createHingePoints(baseY);
@@ -731,8 +1107,8 @@ function createHingePoints(baseY) {
     });
     const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.rotation.x = Math.PI / 2;
-    ring.position.set(0, hingeY, 0);
-    obeliskGroup.add(ring);
+    ring.position.set(0, hingeY, STAGE_Z);
+    scene.add(ring);
 
     // Label
     const canvas = document.createElement("canvas");
@@ -748,8 +1124,8 @@ function createHingePoints(baseY) {
     const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.0 });
     const sprite = new THREE.Sprite(spriteMat);
     sprite.scale.set(0.6, 0.6, 0.6);
-    sprite.position.set(1.2, hingeY, 0);
-    obeliskGroup.add(sprite);
+    sprite.position.set(1.2, hingeY, STAGE_Z);
+    scene.add(sprite);
 
     hingePoints.push({
       height: h,
@@ -843,114 +1219,153 @@ function activateHinge(hingePoint) {
   hingePoint.activated = true;
 
   const h = hingePoint.height;
-  const baseY = hingePoint.baseY;
 
   // Hide the hinge ring
   gsap.to(hingePoint.ring.material, { opacity: 0, duration: 0.3 });
   gsap.to(hingePoint.labelMat, { opacity: 0, duration: 0.3 });
 
-  // Determine which segments are above the hinge
-  const segsAbove = obeliskSegments.filter((s) => s.mesh.position.y > baseY + h * CUBE_SIZE - 0.01);
-
-  // Create a pivot group for the fold
-  const pivotY = baseY + h * CUBE_SIZE;
-  const pivotGroup = new THREE.Group();
-  pivotGroup.position.set(0, pivotY, 0);
-  obeliskGroup.add(pivotGroup);
-
-  // Reparent segments above hinge into the pivot
-  for (const seg of segsAbove) {
-    const worldPos = new THREE.Vector3();
-    seg.mesh.getWorldPosition(worldPos);
-    obeliskGroup.remove(seg.mesh);
-    pivotGroup.add(seg.mesh);
-    // Adjust position relative to pivot
-    seg.mesh.position.set(worldPos.x - pivotGroup.position.x - obeliskGroup.position.x, worldPos.y - pivotGroup.position.y - obeliskGroup.position.y, worldPos.z - obeliskGroup.position.z);
-  }
-
   // Determine fold direction based on hinge height
-  // Hinge at 6: CCW (negative rotation around X)
-  // Hinge at 4: CCW first, then CW together
-  // Hinge at 3: follows zig-zag
-  // Hinge at 2: follows zig-zag
   const isCCWFold = [6, 3].includes(h); // zig-zag: 6 and 3 fold counter-clockwise
-  const rotationAngle = isCCWFold ? -Math.PI : Math.PI;
+  const rotationTarget = isCCWFold ? -Math.PI + 0.08 : Math.PI - 0.08;
+  const hingeJoint = obeliskJointByHeight.get(h);
 
   // Spawn factor trinket
   const factorNum = h;
   const matType = isPrime(factorNum) ? "prime" : factorNum === 1 ? "mirror" : "composite";
   createTrinket(factorNum, matType);
 
-  // Animate the fold
-  const tl = gsap.timeline({
-    onComplete: () => {
-      // Reparent segments back
-      for (const seg of segsAbove) {
-        const worldPos = new THREE.Vector3();
-        seg.mesh.getWorldPosition(worldPos);
-        pivotGroup.remove(seg.mesh);
-        obeliskGroup.add(seg.mesh);
-        seg.mesh.position.set(
-          worldPos.x - obeliskGroup.position.x,
-          worldPos.y - obeliskGroup.position.y,
-          worldPos.z - obeliskGroup.position.z
-        );
-      }
-      obeliskGroup.remove(pivotGroup);
+  if (hingeJoint) {
+    if (hingeJoint.setLimits) {
+      hingeJoint.setLimits(Math.min(0, rotationTarget), Math.max(0, rotationTarget));
+    }
+    if (hingeJoint.configureMotorPosition) {
+      hingeJoint.configureMotorPosition(rotationTarget, 28, 6);
+    }
+    if (hingeJoint.configureMotorVelocity) {
+      hingeJoint.configureMotorVelocity(isCCWFold ? -6.5 : 6.5, 10);
+    }
+  }
 
-      // Material transformation: if the hinge height is prime (2 or 3),
-      // transform the folded segments to Supernova material
-      if (isPrime(h)) {
-        transformToPrime(segsAbove);
-      }
+  const sourceSegment = obeliskSegments[Math.min(obeliskSegments.length - 1, h)];
+  if (isPrime(h) && sourceSegment) {
+    triggerPrimeDiscovery(h, sourceSegment);
+  }
 
-      // Record fold for unspooling
-      foldHistory.push({
-        hingePoint,
-        segsAbove: [...segsAbove],
-        rotationAngle,
-        pivotY,
-      });
+  gsap.delayedCall(0.9, () => {
+    playThud();
+    cameraShake(0.2, 0.25);
+    foldingActive = false;
 
-      foldingActive = false;
-
-      // Check if all hinges activated
-      if (hingePoints.every((hp) => hp.activated)) {
-        foldingComplete = true;
-        revealHandle();
-      }
-    },
-  });
-
-  tl.to(pivotGroup.rotation, {
-    x: rotationAngle,
-    duration: 0.8,
-    ease: "power2.inOut",
-    onComplete: () => {
-      playThud();
-      cameraShake(0.2, 0.25);
-    },
+    // Check if all hinges activated
+    if (hingePoints.every((hp) => hp.activated)) {
+      foldingComplete = true;
+    }
   });
 }
 
-// ── Material Transformation to Supernova ─────────────────────────────
-function transformToPrime(segments) {
-  const reusableVec = new THREE.Vector3();
-  for (const seg of segments) {
-    const oldMat = seg.mesh.material;
-    seg.mesh.material = createPrimeMaterial();
-    primeShaderMeshes.push(seg.mesh);
+async function triggerPrimeDiscovery(primeNumber, segment) {
+  const startPos = new THREE.Vector3();
+  segment.mesh.getWorldPosition(startPos);
 
-    // Add point light for glow
-    const pl = new THREE.PointLight(0xff6600, 15, 6, 2);
-    seg.mesh.add(pl);
+  const cloneMesh = new THREE.Mesh(segment.mesh.geometry.clone(), segment.mesh.material.clone());
+  cloneMesh.castShadow = true;
+  cloneMesh.receiveShadow = true;
+  cloneMesh.position.copy(startPos);
+  scene.add(cloneMesh);
 
-    // Flash effect
-    seg.mesh.getWorldPosition(reusableVec);
-    createFlash(reusableVec.clone());
+  const rbDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(startPos.x, startPos.y, startPos.z);
+  const rigidBody = world.createRigidBody(rbDesc);
+  rigidBody.setGravityScale(0.0, true);
+  rigidBody.setLinearDamping(0.15);
+  rigidBody.setAngularDamping(0.35);
 
-    if (oldMat.dispose) oldMat.dispose();
-  }
+  const cd = RAPIER.ColliderDesc.cuboid(CUBE_SIZE / 2, CUBE_SIZE / 2, CUBE_SIZE / 2)
+    .setRestitution(0.0)
+    .setFriction(0.92)
+    .setDensity(1.6);
+  world.createCollider(cd, rigidBody);
+
+  bodies.push({ mesh: cloneMesh, rigidBody });
+
+  const slidePromise = autoSlideDex(primeNumber);
+  const compressPromise = runCompressionAnimation(cloneMesh, rigidBody);
+  await Promise.all([slidePromise, compressPromise]);
+
+  const target = getLandingDropTarget();
+  rigidBody.setTranslation(
+    {
+      x: target.x,
+      y: PRIMEDEX_Y + PRIMEDEX_DROP_HEIGHT,
+      z: target.z,
+    },
+    true
+  );
+  rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  rigidBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  rigidBody.setGravityScale(1.0, true);
+
+  gsap.delayedCall(0.55, () => {
+    playThud();
+    cameraShake(0.08, 0.12);
+  });
+}
+
+function runCompressionAnimation(mesh, rigidBody) {
+  const start = rigidBody.translation();
+  const state = {
+    x: start.x,
+    y: start.y,
+    z: start.z,
+    sx: 1,
+    sy: 1,
+    sz: 1,
+  };
+
+  return new Promise((resolve) => {
+    const tl = gsap.timeline({
+      onUpdate: () => {
+        rigidBody.setTranslation({ x: state.x, y: state.y, z: state.z }, true);
+        rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        mesh.scale.set(state.sx, state.sy, state.sz);
+      },
+      onComplete: () => {
+        mesh.scale.set(1, 1, 1);
+        resolve();
+      },
+    });
+
+    tl.to(state, {
+      y: start.y + 0.85,
+      duration: 0.22,
+      ease: "power2.out",
+    });
+
+    tl.to(
+      state,
+      {
+        x: PRIMEDEX_LANDING_X,
+        y: PRIMEDEX_Y + PRIMEDEX_DROP_HEIGHT,
+        z: PRIMEDEX_Z,
+        duration: 0.72,
+        ease: "power2.inOut",
+      },
+      0.12
+    );
+
+    tl.to(
+      state,
+      {
+        sx: 1.25,
+        sy: 0.62,
+        sz: 1.25,
+        duration: 0.2,
+        repeat: 1,
+        yoyo: true,
+        ease: "power2.inOut",
+      },
+      0.2
+    );
+  });
 }
 
 // ── Reveal Handle (after all folds complete) ─────────────────────────
@@ -1120,14 +1535,24 @@ function loop() {
   // Update breathing hints on idle hinges
   updateBreathingHints(elapsed);
 
-  renderer.render(scene, camera);
+  if (composer) {
+    composer.render();
+  } else {
+    renderer.render(scene, camera);
+  }
 }
 
 // ── Resize Handler ──────────────────────────────────────────────────
 function onResize() {
+  if (!camera || !renderer) return;
+
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  if (composer) {
+    composer.setSize(window.innerWidth, window.innerHeight);
+    if (bloomPass) bloomPass.setSize(window.innerWidth, window.innerHeight);
+  }
   compositeScreenSize.w = window.innerWidth;
   compositeScreenSize.h = window.innerHeight;
 }
@@ -1136,9 +1561,21 @@ function onResize() {
 const startBtn = document.getElementById("startBtn");
 if (startBtn) {
   startBtn.addEventListener("pointerdown", async () => {
-    startBtn.remove();
-    await init();
+    try {
+      // Resume Audio Context for the "Thud" sounds
+      if (audioCtx && audioCtx.state === "suspended") {
+        await audioCtx.resume();
+      }
+
+      // Attempt to initialize the world
+      await init();
+
+      // Only remove the button if we successfully reached the loop
+      startBtn.style.display = "none";
+      console.log("Ignition successful.");
+    } catch (err) {
+      console.error("Critical Ignition Failure:", err);
+      alert("App failed to start. Check console for details.");
+    }
   });
-} else {
-  init();
 }
