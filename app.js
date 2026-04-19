@@ -209,7 +209,7 @@ function createCompositeMaterial() {
     color: 0xc8c8c8,
     metalness: 0.8,
     roughness: 0.4,
-    envMap: mirrorRenderTarget ? mirrorRenderTarget.texture : null,
+    envMap: mirrorRenderTarget.texture,
   });
 
   // Triple-layer logic via onBeforeCompile:
