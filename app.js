@@ -207,8 +207,9 @@ const compositeScreenSize = { w: window.innerWidth, h: window.innerHeight };
 function createCompositeMaterial() {
   const mat = new THREE.MeshStandardMaterial({
     color: 0xc8c8c8,
-    metalness: 0.9,
+    metalness: 0.8,
     roughness: 0.4,
+    envMap: mirrorRenderTarget ? mirrorRenderTarget.texture : null,
   });
 
   // Triple-layer logic via onBeforeCompile:
@@ -238,13 +239,7 @@ function createCompositeMaterial() {
 function getOrCreateMirrorMaterial() {
   if (mirrorMaterial) return mirrorMaterial;
 
-  mirrorRenderTarget = new THREE.WebGLCubeRenderTarget(256, {
-    generateMipmaps: true,
-    minFilter: THREE.LinearMipmapLinearFilter,
-  });
-  mirrorCubeCamera = new THREE.CubeCamera(0.1, 100, mirrorRenderTarget);
-  scene.add(mirrorCubeCamera);
-
+  // Render target and cube camera are created in init(); just build the material
   mirrorMaterial = new THREE.MeshStandardMaterial({
     envMap: mirrorRenderTarget.texture,
     metalness: 1.0,
@@ -290,7 +285,15 @@ async function init() {
   renderer.toneMappingExposure = 1.2;
   document.body.appendChild(renderer.domElement);
 
-  // 5. Lighting — No ambient light. Two spotlights only.
+  // 5. Shared CubeCamera / RenderTarget (used by mirror '1' and composite envMaps)
+  mirrorRenderTarget = new THREE.WebGLCubeRenderTarget(256, {
+    generateMipmaps: true,
+    minFilter: THREE.LinearMipmapLinearFilter,
+  });
+  mirrorCubeCamera = new THREE.CubeCamera(0.1, 100, mirrorRenderTarget);
+  scene.add(mirrorCubeCamera);
+
+  // 6. Lighting — No ambient light. Two spotlights only.
   // Primary SpotLight hitting the Altar
   const altarSpot = new THREE.SpotLight(0xffffff, 500);
   altarSpot.position.set(5, 12, 10);
@@ -346,7 +349,7 @@ function createRoom() {
     metalness: 0.0,
     map: concreteTexture,
     bumpMap: concreteBumpTexture,
-    bumpScale: 0.08,
+    bumpScale: 0.1,
   });
 
   const roomW = 30; // width  (x)
@@ -415,7 +418,7 @@ function createAltar() {
     metalness: 0.0,
     map: concreteTexture,
     bumpMap: concreteBumpTexture,
-    bumpScale: 0.08,
+    bumpScale: 0.1,
   });
 
   const pz = 14; // foreground altar position
@@ -469,7 +472,7 @@ function createObelisk() {
     metalness: 0.05,
     map: concreteTexture,
     bumpMap: concreteBumpTexture,
-    bumpScale: 0.08,
+    bumpScale: 0.1,
   });
 
   // Tapered obelisk shape using a cylinder with a smaller top radius
@@ -536,7 +539,9 @@ function onClickSpawn(event) {
 
   // Rapier dynamic body – heavy with zero bounciness, solid 'dead thud'
   const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
-    .setTranslation(spawnX, spawnY, spawnZ);
+    .setTranslation(spawnX, spawnY, spawnZ)
+    .setLinearDamping(0.5)
+    .setAngularDamping(0.5);
   const rigidBody = world.createRigidBody(bodyDesc);
 
   const colliderDesc = RAPIER.ColliderDesc.cuboid(
