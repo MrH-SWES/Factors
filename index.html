@@ -1369,7 +1369,7 @@ function triggerPrimeDiscovery(divisor, sourceSeg) {
           bodies.push({ mesh, rigidBody: rb });
 
           const dropDistance = Math.max(0, mesh.position.y - target.y);
-          const dropDurationMs = Math.sqrt((2 * dropDistance) / PHYSICS_GRAVITY_MAGNITUDE) * 1000;
+          const dropDurationMs = Math.sqrt(2 * dropDistance / PHYSICS_GRAVITY_MAGNITUDE) * 1000;
           window.setTimeout(() => {
             playThud();
           }, dropDurationMs + IMPACT_SOUND_DELAY_MS);
