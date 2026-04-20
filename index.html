@@ -192,6 +192,7 @@ const ALTAR_SLAB_H = 1.2;
 const ALTAR_TOP_Y = ALTAR_PED_H + ALTAR_SLAB_H; // 2.0 — the working surface of the altar
 const CUBE_SIZE = 1;
 const NUM_CUBES = 12;
+const PHYSICS_GRAVITY_Y = -15;
 
 const PRIMEDEX_SLOT_SPACING = 1.15;
 
@@ -650,7 +651,7 @@ function getOrCreateMirrorMaterial() {
 async function init() {
   // 1. Rapier WASM initialisation (async/await for mobile WASM memory)
   await RAPIER.init();
-  world = new RAPIER.World({ x: 0.0, y: -15.0, z: 0.0 });
+  world = new RAPIER.World({ x: 0.0, y: PHYSICS_GRAVITY_Y, z: 0.0 });
 
   // 2. Three.js scene
   scene = new THREE.Scene();
@@ -1364,12 +1365,10 @@ function triggerPrimeDiscovery(divisor, sourceSeg) {
             .setDensity(1.5);
           world.createCollider(colliderDesc, rb);
 
-          rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
-
           bodies.push({ mesh, rigidBody: rb });
 
           const dropDistance = Math.max(0, hoverY - target.y);
-          const dropDurationMs = Math.sqrt((2 * dropDistance) / 15) * 1000;
+          const dropDurationMs = Math.sqrt((2 * dropDistance) / Math.abs(PHYSICS_GRAVITY_Y)) * 1000;
           window.setTimeout(() => {
             playThud();
           }, dropDurationMs + 40);
