@@ -814,7 +814,7 @@ async function init() {
 
     function darkenNonBloomed() {
       scene.traverse((obj) => {
-        if (obj === roomMesh) return;
+        if (roomMesh !== null && obj === roomMesh) return;
         if (obj.isMesh && !bloomLayer.test(obj.layers)) {
           materialCache[obj.uuid] = obj.material;
           obj.material = darkMaterial;
