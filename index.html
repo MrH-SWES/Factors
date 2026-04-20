@@ -924,7 +924,7 @@ function createExitSigil(wallFrontZ) {
   // Right vertical stroke (upper half)
   const rightStrokeGeo = new THREE.BoxGeometry(strokeW, oneH / 2 - barH / 2, extrudeDepth);
   const rightStrokeMesh = new THREE.Mesh(rightStrokeGeo, stoneMat);
-  rightStrokeMesh.position.set(twoX + barW / 2 - strokeW / 2, oneH / 4 - barH / 4 + barH / 4, extrudeDepth / 2);
+  rightStrokeMesh.position.set(twoX + barW / 2 - strokeW / 2, oneH / 4, extrudeDepth / 2);
   rightStrokeMesh.castShadow = true;
   sigilGroup.add(rightStrokeMesh);
 
@@ -937,7 +937,7 @@ function createExitSigil(wallFrontZ) {
   // Left vertical stroke (lower half)
   const leftStrokeGeo = new THREE.BoxGeometry(strokeW, oneH / 2 - barH / 2, extrudeDepth);
   const leftStrokeMesh = new THREE.Mesh(leftStrokeGeo, stoneMat);
-  leftStrokeMesh.position.set(twoX - barW / 2 + strokeW / 2, -oneH / 4 + barH / 4 - barH / 4, extrudeDepth / 2);
+  leftStrokeMesh.position.set(twoX - barW / 2 + strokeW / 2, -oneH / 4, extrudeDepth / 2);
   leftStrokeMesh.castShadow = true;
   sigilGroup.add(leftStrokeMesh);
 
@@ -1420,9 +1420,10 @@ function createTrinket(label, materialType) {
   altarTrinkets.sort((a, b) => a.label - b.label);
 
   // Reposition all trinkets centered on the altar.
-  // Slab top surface is at pedH (0.8) + slabH (1.2) = 2.0. Place trinkets
-  // flush on top of the slab, not sunk into it.
-  const slabTopY = 2.0; // pedH + slabH
+  // Slab top surface: pedestal height (0.8) + slab height (1.2) = 2.0.
+  // Place trinkets flush on top of the slab, not sunk into it.
+  const pedH = 0.8, slabH = 1.2; // must match createAltar() geometry
+  const slabTopY = pedH + slabH;
   const trinketSpacing = 1.15; // matches dex well spacing
   const totalWidth = (altarTrinkets.length - 1) * trinketSpacing;
   const startX = -totalWidth / 2;
