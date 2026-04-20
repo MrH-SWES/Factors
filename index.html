@@ -584,7 +584,7 @@ const compositeScreenSize = { w: window.innerWidth, h: window.innerHeight };
 
 function createCompositeMaterial() {
   const mat = new THREE.MeshStandardMaterial({
-    color: 0xc8ccd0,
+    color: 0x5a5c60,
     metalness: 0.5,
     roughness: 0.42,
     map: brushedMetalTexture,
@@ -599,8 +599,8 @@ function createCompositeMaterial() {
        vec3 viewNormal = normalize(vNormal);
        float highlight = smoothstep(0.5, 1.0, dot(viewNormal, normalize(vec3(-1.0, 1.0, 1.0))));
        float shadow = smoothstep(0.5, 1.0, dot(viewNormal, normalize(vec3(1.0, -1.0, -1.0))));
-       gl_FragColor.rgb += vec3(0.15) * highlight;
-       gl_FragColor.rgb -= vec3(0.08) * shadow;`
+       gl_FragColor.rgb += vec3(0.4) * highlight;
+       gl_FragColor.rgb -= vec3(0.3) * shadow;`
     );
   };
 
@@ -617,7 +617,7 @@ function getOrCreateMirrorMaterial() {
     metalness: 1.0,
     roughness: 0.0,
     envMap: mirrorRenderTarget.texture,
-    envMapIntensity: 3.0,
+    envMapIntensity: 5.0,
   });
   return mirrorMaterial;
 }
@@ -1267,9 +1267,13 @@ function triggerPrimeDiscovery(divisor, sourceSeg) {
     gsap.delayedCall(0.95, () => {
       const target = getLandingDropTarget();
 
-      // Build a dynamic rigidbody at the cube's current world position.
+      // Snap the cube exactly above the well center before creating the
+      // physics body so the drop is perfectly vertical into the cell.
+      mesh.position.set(target.x, mesh.position.y, target.z);
+
+      // Build a dynamic rigidbody at the snapped position.
       const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(mesh.position.x, mesh.position.y, mesh.position.z)
+        .setTranslation(target.x, mesh.position.y, target.z)
         .setLinearDamping(0.25)
         .setAngularDamping(2.0); // keep it from tumbling — it should drop square
       const rb = world.createRigidBody(bodyDesc);
@@ -1281,11 +1285,8 @@ function triggerPrimeDiscovery(divisor, sourceSeg) {
         .setDensity(1.2);
       world.createCollider(colliderDesc, rb);
 
-      // Nudge the cube horizontally onto the exact landing X/Z in case the
-      // arc ended a hair off. Small linear velocity toward the well center.
-      const dx = target.x - mesh.position.x;
-      const dz = target.z - mesh.position.z;
-      rb.setLinvel({ x: dx * 2.0, y: 0, z: dz * 2.0 }, true);
+      // Zero horizontal velocity — the cube drops straight down into the well.
+      rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
 
       // Register for per-frame sync — the render loop will update the mesh
       // position from the rigid body from here on.
@@ -1342,7 +1343,7 @@ function createTrinket(label, materialType) {
     if (materialType === "mirror") {
       ctx.fillStyle = "#bbbbbb";
     } else {
-      ctx.fillStyle = "#c8ccd0";
+      ctx.fillStyle = "#5a5c60";
     }
     ctx.fillRect(0, 0, 256, 256);
     ctx.fillStyle = materialType === "mirror" ? "rgba(0,0,0,0.3)" : "rgba(0,0,0,0.25)";
@@ -1589,14 +1590,13 @@ function createHingePoints(baseY) {
   for (const def of hingeDefs) {
     const hingeY = baseY + def.height * CUBE_SIZE;
 
-    // Signature Math Things. bead — a brushed-aluminum sphere. The brand
-    // bead is a neutral metallic orb (intentionally neither warm nor cool),
-    // rendered with a radial top-left highlight and a 135° metallic gradient.
-    // It IS the hinge, visually and pedagogically. The breathing neon glow
-    // lives on a separate additive-blend sphere so we can modulate it without
-    // touching the bead's metallic shading.
+    // Brushed Aluminum Bead — a cylinder rotated 90° horizontally so it
+    // reads as a mechanical hinge pin running through the obelisk edge.
+    // The breathing neon glow lives on a separate additive-blend cylinder
+    // so we can modulate it without touching the bead's metallic shading.
     const beadRadius = 0.22;
-    const beadGeo = new THREE.SphereGeometry(beadRadius, 24, 18);
+    const beadLength = CUBE_SIZE * 0.6;
+    const beadGeo = new THREE.CylinderGeometry(beadRadius, beadRadius, beadLength, 24, 1);
     const beadMat = new THREE.MeshStandardMaterial({
       color: 0xdcdcdc,         // neutral aluminum
       metalness: 0.92,
@@ -1607,12 +1607,13 @@ function createHingePoints(baseY) {
     });
     const bead = new THREE.Mesh(beadGeo, beadMat);
     bead.position.set(-CUBE_SIZE / 2 - beadRadius + 0.02, hingeY, STAGE_Z);
+    bead.rotation.x = Math.PI / 2; // rotate 90° so cylinder axis runs along Z (horizontal pin)
     bead.castShadow = true;
     scene.add(bead);
 
-    // Neon glow layer — slightly larger sphere in additive blend. Its opacity
+    // Neon glow layer — slightly larger cylinder in additive blend. Its opacity
     // breathes from ~0 up to a grimy neon green and back down when idle.
-    const glowGeo = new THREE.SphereGeometry(beadRadius * 1.35, 24, 18);
+    const glowGeo = new THREE.CylinderGeometry(beadRadius * 1.35, beadRadius * 1.35, beadLength * 1.1, 24, 1);
     const glowMat = new THREE.MeshBasicMaterial({
       color: 0x00ff88,
       transparent: true,
@@ -1622,6 +1623,7 @@ function createHingePoints(baseY) {
     });
     const glow = new THREE.Mesh(glowGeo, glowMat);
     glow.position.copy(bead.position);
+    glow.rotation.x = Math.PI / 2;
     scene.add(glow);
 
     // Invisible hit sphere — forgiving tap target, 5× visible bead radius.
@@ -1636,22 +1638,6 @@ function createHingePoints(baseY) {
     hitMesh.renderOrder = 999;
     scene.add(hitMesh);
 
-    // The "÷N" sprite label is kept hidden by default (it was an overlay for
-    // debugging; real teaching text comes from the segment numerals themselves).
-    const canvas = document.createElement("canvas");
-    canvas.width = 64; canvas.height = 64;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#00ff88";
-    ctx.font = "bold 28px monospace";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText("÷" + def.divisor, 32, 32);
-    const tex = new THREE.CanvasTexture(canvas);
-    const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.0 });
-    const sprite = new THREE.Sprite(spriteMat);
-    sprite.scale.set(0.6, 0.6, 0.6);
-    sprite.position.set(-CUBE_SIZE / 2 - 0.8, hingeY, STAGE_Z);
-    scene.add(sprite);
-
     hingePoints.push({
       height: def.height,
       divisor: def.divisor,
@@ -1660,8 +1646,8 @@ function createHingePoints(baseY) {
       glow,               // neon breathing layer
       glowMat,
       hitMesh,            // large invisible tap target
-      label: sprite,
-      labelMat: spriteMat,
+      label: null,
+      labelMat: null,
       activated: false,
       baseY: baseY,
     });
@@ -2123,6 +2109,17 @@ function activateHinge(hingePoint) {
   obeliskState.divisor = divisor;
   obeliskState.foldDir = foldDir;
 
+  // ── Immediate Prime Material Swap ────────────────────────────────────
+  // If the divisor is prime (2, 3), swap every segment to the supernova
+  // material NOW — before the fold animation starts — so the fallen pieces
+  // ignite with plasma energy as they topple.
+  const divisorIsPrime = isPrime(divisor);
+  if (divisorIsPrime) {
+    for (const seg of obeliskSegments) {
+      applyPrimeMaterialToSegment(seg.mesh, divisor);
+    }
+  }
+
   // ── Animate the fold ─────────────────────────────────────────────────
   // Sort by depth ASCENDING — innermost (topmost, depth=1) hinge fires first.
   const sortedHinges = [...obeliskState.hinges].sort((a, b) => a.depth - b.depth);
@@ -2130,15 +2127,14 @@ function activateHinge(hingePoint) {
   const tl = gsap.timeline({
     onComplete: () => {
       // STEP 1: Apply material + engrave numerals on the now-settled segments.
-      // For prime divisors each segment gets the supernova shader; for composite
-      // divisors each segment gets its numeral engraved (upright regardless of
-      // whether the segment landed right-side-up or inverted).
+      // Prime divisors already have their supernova shader applied immediately
+      // on segment creation (before the fold animation). Composite divisors get
+      // their gravity-aware numeral engraved here, after the fold settles so
+      // we can read the world orientation correctly.
       const segH = obeliskState.divisor * CUBE_SIZE;
       const divisorIsPrime = isPrime(obeliskState.divisor);
-      for (const seg of obeliskSegments) {
-        if (divisorIsPrime) {
-          applyPrimeMaterialToSegment(seg.mesh, obeliskState.divisor);
-        } else {
+      if (!divisorIsPrime) {
+        for (const seg of obeliskSegments) {
           engraveNumeralOnSegment(seg.mesh, obeliskState.divisor, segH);
         }
       }
@@ -2244,7 +2240,7 @@ function createSegmentMesh(segH, numeral = null) {
     canvas.height = 256 * units;
     const ctx = canvas.getContext("2d");
     // Aluminum base tint — matches the composite material color
-    ctx.fillStyle = "#c8ccd0";
+    ctx.fillStyle = "#5a5c60";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     // Engraved-look numeral — dark, slight inset feel
     ctx.fillStyle = "rgba(20,22,28,0.55)";
@@ -2287,7 +2283,7 @@ function engraveNumeralOnSegment(mesh, numeral, segH) {
   canvas.width = 256;
   canvas.height = 256 * units;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#c8ccd0";
+  ctx.fillStyle = "#5a5c60";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   if (inverted) {
