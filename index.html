@@ -162,6 +162,9 @@ import RAPIER from "rapier";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
+
+const BLOOM_LAYER = 1;
 
 // ── Mobile Debugger ──────────────────────────────────────────────────
 window.onerror = function (msg, src, line, col, err) {
@@ -174,6 +177,7 @@ let concreteTexture, concreteBumpTexture;
 let brushedMetalTexture;
 let mirrorCubeCamera, mirrorRenderTarget, mirrorMaterial;
 let composer, bloomPass;
+let bloomComposer, finalComposer;
 let mirrorMesh = null; // explicit reference to the '1' mirror block
 const bodies = []; // { mesh, rigidBody, pointLight? } pairs for sync
 const primeShaderMeshes = []; // meshes using supernova shader (need time uniform updates)
@@ -608,12 +612,12 @@ const compositeScreenSize = { w: window.innerWidth, h: window.innerHeight };
 
 function createCompositeMaterial() {
   const mat = new THREE.MeshStandardMaterial({
-    color: 0x7a7e82,       // dark gunmetal — reads as dim metal, not bright
+    color: 0x6a6d70,       // darker gunmetal — dense, heavy, non-reflective metal
     metalness: 0.3,        // moderate metal for proper highlights
-    roughness: 0.7,        // brushed finish
+    roughness: 0.85,       // heavier brushed finish
     map: brushedMetalTexture,
     envMap: mirrorRenderTarget ? mirrorRenderTarget.texture : null,
-    envMapIntensity: 0.4,  // subtle environmental reflection
+    envMapIntensity: 0.15, // very subtle environmental reflection
   });
 
   // "Bead" highlight logic — normal-based so it stays locked to each block's
@@ -689,11 +693,85 @@ async function init() {
   document.body.appendChild(renderer.domElement);
 
   try {
-    composer = new EffectComposer(renderer);
-    composer.addPass(new RenderPass(scene, camera));
-    // High threshold keeps bloom focused on only the hottest prime core values.
-    bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.8, 0.5, 1.5);
-    composer.addPass(bloomPass);
+    // ── Selective Bloom setup ─────────────────────────────────────────
+    // bloomComposer renders only BLOOM_LAYER objects to a texture.
+    // finalComposer blends that bloom texture over the full base render.
+    const bloomLayer = new THREE.Layers();
+    bloomLayer.set(BLOOM_LAYER);
+
+    // Materials darkened during bloom pass so non-bloom objects don't glow.
+    const darkMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const materialCache = {};
+
+    function darkenNonBloomed() {
+      scene.traverse((obj) => {
+        if (obj.isMesh && !bloomLayer.test(obj.layers)) {
+          materialCache[obj.uuid] = obj.material;
+          obj.material = darkMaterial;
+        }
+      });
+    }
+
+    function restoreMaterials() {
+      scene.traverse((obj) => {
+        if (obj.isMesh && materialCache[obj.uuid]) {
+          obj.material = materialCache[obj.uuid];
+          delete materialCache[obj.uuid];
+        }
+      });
+    }
+
+    // Bloom-only composer (renders the glow texture)
+    bloomComposer = new EffectComposer(renderer);
+    bloomComposer.renderToScreen = false;
+    bloomComposer.addPass(new RenderPass(scene, camera));
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.8, 0.5, 0.1);
+    bloomComposer.addPass(bloomPass);
+
+    // Final blend composer
+    const blendShader = {
+      uniforms: {
+        baseTexture: { value: null },
+        bloomTexture: { value: bloomComposer.renderTarget2.texture },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+      `,
+      fragmentShader: `
+        uniform sampler2D baseTexture;
+        uniform sampler2D bloomTexture;
+        varying vec2 vUv;
+        void main() {
+          gl_FragColor = texture2D(baseTexture, vUv) + vec4(1.0) * texture2D(bloomTexture, vUv);
+        }
+      `,
+    };
+    const blendPass = new ShaderPass(blendShader, "baseTexture");
+    blendPass.needsSwap = true;
+
+    finalComposer = new EffectComposer(renderer);
+    finalComposer.addPass(new RenderPass(scene, camera));
+    finalComposer.addPass(blendPass);
+
+    // Wrap composer to implement the selective bloom two-pass render.
+    composer = {
+      render() {
+        // Pass 1: bloom only BLOOM_LAYER objects
+        camera.layers.set(BLOOM_LAYER);
+        darkenNonBloomed();
+        bloomComposer.render();
+        restoreMaterials();
+        // Pass 2: full scene blended with bloom texture
+        camera.layers.enableAll();
+        finalComposer.render();
+      },
+      setSize(w, h) {
+        bloomComposer.setSize(w, h);
+        finalComposer.setSize(w, h);
+        if (bloomPass) bloomPass.setSize(w, h);
+      },
+    };
   } catch (err) {
     console.warn("Post-processing unavailable, using direct renderer:", err);
     composer = null;
@@ -1432,7 +1510,9 @@ function createTrinket(label, materialType) {
 
   if (materialType === "prime") {
     primeShaderMeshes.push(mesh);
+    mesh.layers.enable(BLOOM_LAYER);
     const pl = new THREE.PointLight(0xff6600, 2, 3, 2);
+    pl.layers.enable(BLOOM_LAYER);
     mesh.add(pl);
   }
 
@@ -1693,14 +1773,12 @@ function createHingePoints(baseY) {
   for (const def of hingeDefs) {
     const hingeY = baseY + def.height * CUBE_SIZE;
 
-    // Signature Math Things. bead — a brushed-aluminum sphere. The brand
-    // bead is a neutral metallic orb (intentionally neither warm nor cool),
-    // rendered with a radial top-left highlight and a 135° metallic gradient.
-    // It IS the hinge, visually and pedagogically. The breathing neon glow
-    // lives on a separate additive-blend sphere so we can modulate it without
-    // touching the bead's metallic shading.
+    // Signature Math Things. bead — a domed hinge pin in profile, consisting
+    // of a spherical dome backed by a flat washer bracket, grouped together.
     const beadRadius = 0.22;
-    const beadGeo = new THREE.SphereGeometry(beadRadius, 24, 18);
+    const beadGroup = new THREE.Group();
+
+    const domeGeo = new THREE.SphereGeometry(beadRadius, 24, 24);
     const beadMat = new THREE.MeshStandardMaterial({
       color: 0xdcdcdc,         // neutral aluminum
       metalness: 0.92,
@@ -1709,14 +1787,31 @@ function createHingePoints(baseY) {
       envMap: mirrorRenderTarget ? mirrorRenderTarget.texture : null,
       envMapIntensity: 1.4,
     });
-    const bead = new THREE.Mesh(beadGeo, beadMat);
+    const dome = new THREE.Mesh(domeGeo, beadMat);
+    beadGroup.add(dome);
+
+    // Flat washer bracket behind the dome
+    const washerGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.05, 16);
+    const washerMat = new THREE.MeshStandardMaterial({
+      color: 0xdcdcdc,
+      metalness: 0.92,
+      roughness: 0.28,
+      map: brushedMetalTexture,
+      envMap: mirrorRenderTarget ? mirrorRenderTarget.texture : null,
+      envMapIntensity: 1.4,
+    });
+    const washer = new THREE.Mesh(washerGeo, washerMat);
+    washer.rotation.x = Math.PI / 2; // orient flat face toward camera
+    washer.position.z = -beadRadius * 0.8;
+    beadGroup.add(washer);
+
+    const bead = beadGroup;
     bead.position.set(-CUBE_SIZE / 2 - beadRadius + 0.02, hingeY, STAGE_Z);
-    bead.castShadow = true;
+    bead.children.forEach(c => { c.castShadow = true; });
     scene.add(bead);
 
-    // Neon glow layer — slightly larger sphere in additive blend. Its opacity
-    // breathes from ~0 up to a grimy neon green and back down when idle.
-    const glowGeo = new THREE.SphereGeometry(beadRadius * 1.35, 24, 18);
+    // Thin torus ring wrapping the base of the bead — a subtle interaction hint.
+    const glowGeo = new THREE.TorusGeometry(0.23, 0.02, 16, 32);
     const glowMat = new THREE.MeshBasicMaterial({
       color: 0x00ff88,
       transparent: true,
@@ -1778,7 +1873,8 @@ function createHingePoints(baseY) {
 // until the student has had a chance to think.
 const IDLE_THRESHOLD = 3.0;       // seconds of inactivity before the glow appears
 const BREATH_PERIOD = 3.2;        // seconds per full inhale+exhale cycle
-const BREATH_PEAK_OPACITY = 0.85; // peak neon intensity (grimy, not UI-bright)
+const BREATH_PEAK_OPACITY = 0.85; // peak neon intensity for handle (grimy, not UI-bright)
+const HINGE_BREATH_PEAK_OPACITY = 0.4; // hinge torus pulses subtly: 0.0 → 0.4
 const BREATH_FADE_IN = 1.2;       // seconds for the first fade-up to reach full cadence
 
 // Smooth easing for the fade — starts gentle, peaks softly, fades gently.
@@ -1803,12 +1899,13 @@ function updateBreathingHints(elapsed) {
   // Shared breath phase so hinges AND handle inhale/exhale in sync.
   const phase = (elapsed % BREATH_PERIOD) / BREATH_PERIOD;
   const breath = breathCurve(phase) * BREATH_PEAK_OPACITY * envelope;
+  const hingBreath = breathCurve(phase) * HINGE_BREATH_PEAK_OPACITY * envelope;
 
   // Hinges — only glow on unactivated hinges when the obelisk is intact.
   if (!foldingComplete && obeliskState.pieces === 1) {
     for (const hp of hingePoints) {
       if (hp.activated) { hp.glowMat.opacity = 0; continue; }
-      hp.glowMat.opacity = breath;
+      hp.glowMat.opacity = hingBreath;
     }
   } else {
     // Ensure hinge glows are off when folded
@@ -2495,9 +2592,11 @@ function applyPrimeMaterialToSegment(mesh, numeral) {
   const primeMat = createPrimeMaterial(numeral, inverted, segH);
   mesh.material = primeMat;
   mesh.userData.frontMat = null;
+  mesh.layers.enable(BLOOM_LAYER);
   primeShaderMeshes.push(mesh);
   const pl = new THREE.PointLight(0xff7030, 6.0, 10, 1.8);
   pl.position.set(0, 0, 0.3);
+  pl.layers.enable(BLOOM_LAYER);
   mesh.add(pl);
 }
 
@@ -2685,7 +2784,6 @@ function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   if (composer) {
     composer.setSize(window.innerWidth, window.innerHeight);
-    if (bloomPass) bloomPass.setSize(window.innerWidth, window.innerHeight);
   }
   compositeScreenSize.w = window.innerWidth;
   compositeScreenSize.h = window.innerHeight;
