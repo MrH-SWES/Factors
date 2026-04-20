@@ -1121,14 +1121,14 @@ const DEX_PRIMES = (() => {
 // scroll the dex. A fixed "viewport" (altar-width band) is what's actually
 // visible; sockets outside it slide in from the sides as the user scrolls.
 function createPrimeDex() {
-  const cubbyInnerW = 1.0;                    // inner width each socket can hold
-  const spacing = PRIMEDEX_SLOT_SPACING;       // 1.15 — leaves 0.15 of wall between sockets
   const numCubbies = 144;                      // one socket per number 1–144
+  const spacing = PRIMEDEX_SLOT_SPACING;       // 1.15 — inner socket gap: 1.15 - 1.05 = 0.10
   const stripW = spacing * numCubbies + 0.2;   // total strip width (scrolls)
-  const cubbyDepth = 0.9;                      // how far sockets stick out from altar
-  const floorThick = 0.4;                      // thick slab base
-  const rimThick = 0.075;                      // width of each socket lip wall
-  const rimH = 0.65;                           // height of rim above slab surface
+  const socketW = 1.05;                        // inner socket width — gives 1.0 cube room to fall in
+  const socketD = 1.05;                        // inner socket depth — gives 1.0 cube room to fall in
+  const rimThick = 0.05;                       // width of each socket lip wall
+  const rimH = 0.4;                            // height of rim above slab surface
+  const floorThick = 0.3;                      // thick slab base
 
   // Altar slab geometry constants (must stay in sync with createAltar).
   const altarFrontZ = ALTAR_Z + 1.4 / 2;       // slab front face (slabD/2 = 0.7)
@@ -1140,7 +1140,8 @@ function createPrimeDex() {
   const stripBottomY = altarSlabBottomY - 0.15;           // extend below slab bottom
   const stripH = stripTopY - stripBottomY;
   const stripCenterY = (stripTopY + stripBottomY) / 2;
-  const stripCenterZ = altarFrontZ + cubbyDepth / 2 - 0.05; // slight overlap into slab
+  const totalDepth = socketD + rimThick * 2;               // full slab depth including rims
+  const stripCenterZ = altarFrontZ + totalDepth / 2 - 0.05; // slight overlap into slab
 
   primeDexGroup = new THREE.Group();
   // Initial scroll offset: place socket 1 near the left edge of the visible band.
@@ -1162,21 +1163,13 @@ function createPrimeDex() {
     bumpScale: 0.04,
   });
 
-  // ── Thick horizontal slab (base floor — trinkets sit in recessed sockets on this) ──
-  const botGeo = new THREE.BoxGeometry(stripW, floorThick, cubbyDepth);
+  // ── Continuous bottom slab (trinkets rest on recessed socket floors above this) ──
+  const botGeo = new THREE.BoxGeometry(stripW, floorThick, socketD + rimThick * 2);
   const botMesh = new THREE.Mesh(botGeo, stoneMat);
   botMesh.position.set(0, -stripH / 2 + floorThick / 2, 0);
   botMesh.castShadow = true;
   botMesh.receiveShadow = true;
   primeDexGroup.add(botMesh);
-
-  // ── Back wall (closes off the back of all sockets) ──
-  const backGeo = new THREE.BoxGeometry(stripW, stripH, 0.08);
-  const backMesh = new THREE.Mesh(backGeo, stoneMat);
-  backMesh.position.set(0, 0, -cubbyDepth / 2 + 0.04);
-  backMesh.castShadow = true;
-  backMesh.receiveShadow = true;
-  primeDexGroup.add(backMesh);
 
   // Physics — kinematic body so colliders track the group's scroll position.
   // Initial translation matches the group's scroll offset; updated whenever
@@ -1186,34 +1179,27 @@ function createPrimeDex() {
   primeDexBody = world.createRigidBody(dexBodyDesc);
   primeDexWells = [];
 
-  // Colliders for bottom slab and back wall.
+  // Collider for bottom slab.
   world.createCollider(
-    RAPIER.ColliderDesc.cuboid(stripW / 2, floorThick / 2, cubbyDepth / 2)
+    RAPIER.ColliderDesc.cuboid(stripW / 2, floorThick / 2, totalDepth / 2)
       .setTranslation(0, -stripH / 2 + floorThick / 2, 0),
     primeDexBody
   );
-  world.createCollider(
-    RAPIER.ColliderDesc.cuboid(stripW / 2, stripH / 2, 0.04)
-      .setTranslation(0, 0, -cubbyDepth / 2 + 0.04),
-    primeDexBody
-  );
 
-  // ── Per-socket lips (front, back, left, right rim for each of the 144 sockets) ──
-  // Rims rest on top of the base slab and form physical depressions for cubes.
-  // rimThick = 0.075 exactly fills the 0.15-unit gap between adjacent inner openings.
+  // ── Per-socket rims (front, back, left, right) resting on the floor ──
+  // Four rims per slot form physical depressions that catch dropped cubes.
   const rimY = -stripH / 2 + floorThick + rimH / 2;
   for (let i = 0; i < numCubbies; i++) {
     const localX = (i - (numCubbies - 1) / 2) * spacing;
-    const hw = cubbyInnerW / 2; // half inner width = 0.5
     const rimDefs = [
-      // front rim
-      { w: cubbyInnerW, h: rimH, d: rimThick, x: localX,               y: rimY, z:  cubbyDepth / 2 - rimThick / 2 },
-      // back rim
-      { w: cubbyInnerW, h: rimH, d: rimThick, x: localX,               y: rimY, z: -cubbyDepth / 2 + rimThick / 2 },
       // left rim
-      { w: rimThick,    h: rimH, d: cubbyDepth, x: localX - hw - rimThick / 2, y: rimY, z: 0 },
+      { w: rimThick, h: rimH, d: socketD, x: localX - socketW / 2 - rimThick / 2, y: rimY, z: 0 },
       // right rim
-      { w: rimThick,    h: rimH, d: cubbyDepth, x: localX + hw + rimThick / 2, y: rimY, z: 0 },
+      { w: rimThick, h: rimH, d: socketD, x: localX + socketW / 2 + rimThick / 2, y: rimY, z: 0 },
+      // front rim
+      { w: socketW,  h: rimH, d: rimThick, x: localX, y: rimY, z:  socketD / 2 + rimThick / 2 },
+      // back rim
+      { w: socketW,  h: rimH, d: rimThick, x: localX, y: rimY, z: -socketD / 2 - rimThick / 2 },
     ];
     for (const r of rimDefs) {
       const rimMesh = new THREE.Mesh(new THREE.BoxGeometry(r.w, r.h, r.d), stoneMat);
@@ -1231,16 +1217,16 @@ function createPrimeDex() {
 
   // ── Per-socket landing targets ──
   // Maps every index i (0–143) to number i+1.
+  // worldY = floor of socket + half cube height; worldZ = dead-center of socket hole.
   for (let i = 0; i < numCubbies; i++) {
     const number = i + 1;
     const localX = (i - (numCubbies - 1) / 2) * spacing;
-
     primeDexWells.push({
       prime: number,
       localX,
       // worldX depends on the current scroll offset of primeDexGroup.position.x,
       // so we store localX and compute worldX fresh at drop time (see getCubbyTarget).
-      worldY: stripCenterY - stripH / 2 + floorThick + CUBE_SIZE / 2 + 0.02,
+      worldY: stripCenterY - stripH / 2 + floorThick + CUBE_SIZE / 2,
       worldZ: stripCenterZ,
     });
   }
@@ -1253,8 +1239,8 @@ function createPrimeDex() {
   );
   mirrorCube.position.set(
     slot1.localX,
-    -stripH / 2 + floorThick + CUBE_SIZE / 2 + 0.02,
-    0
+    -stripH / 2 + floorThick + CUBE_SIZE / 2,
+    0  // dead-center of socket hole
   );
   mirrorCube.castShadow = true;
   mirrorCube.receiveShadow = true;
