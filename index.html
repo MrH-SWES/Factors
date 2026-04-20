@@ -743,7 +743,7 @@ async function init() {
         uniform sampler2D bloomTexture;
         varying vec2 vUv;
         void main() {
-          gl_FragColor = texture2D(baseTexture, vUv) + vec4(1.0) * texture2D(bloomTexture, vUv);
+          gl_FragColor = texture2D(baseTexture, vUv) + texture2D(bloomTexture, vUv);
         }
       `,
     };
@@ -1899,13 +1899,13 @@ function updateBreathingHints(elapsed) {
   // Shared breath phase so hinges AND handle inhale/exhale in sync.
   const phase = (elapsed % BREATH_PERIOD) / BREATH_PERIOD;
   const breath = breathCurve(phase) * BREATH_PEAK_OPACITY * envelope;
-  const hingBreath = breathCurve(phase) * HINGE_BREATH_PEAK_OPACITY * envelope;
+  const hingeBreath = breathCurve(phase) * HINGE_BREATH_PEAK_OPACITY * envelope;
 
   // Hinges — only glow on unactivated hinges when the obelisk is intact.
   if (!foldingComplete && obeliskState.pieces === 1) {
     for (const hp of hingePoints) {
       if (hp.activated) { hp.glowMat.opacity = 0; continue; }
-      hp.glowMat.opacity = hingBreath;
+      hp.glowMat.opacity = hingeBreath;
     }
   } else {
     // Ensure hinge glows are off when folded
