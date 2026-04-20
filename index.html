@@ -1125,9 +1125,9 @@ function createPrimeDex() {
   const spacing = PRIMEDEX_SLOT_SPACING;       // 1.15 — inner socket gap: 1.15 - 1.05 = 0.10
   const stripW = spacing * numCubbies + 0.2;   // total strip width (scrolls)
   const socketW = 1.05;                        // inner socket width — gives 1.0 cube room to fall in
-  const socketD = 1.05;                        // inner socket depth — gives 1.0 cube room to fall in
+  const socketD = 1.15;                        // inner socket depth — gives 1.0 cube Z-axis wiggle room
   const rimThick = 0.05;                       // width of each socket lip wall
-  const rimH = 0.4;                            // height of rim above slab surface
+  const rimH = 1.1;                            // height of rim above slab surface (deeper than cube height so it sits recessed)
   const floorThick = 0.3;                      // thick slab base
 
   // Altar slab geometry constants (must stay in sync with createAltar).
@@ -2136,7 +2136,7 @@ function disposeHandle() {
 // through the full list of primes (up to prime #34 = 139, for the N=144 suite).
 // Converts pointer pixels to world X using a tuned factor; clamped to bounds.
 
-const DEX_SCROLL_PX_PER_UNIT = 35; // pixels of drag per 1 world unit of scroll
+const DEX_SCROLL_PX_PER_UNIT = 15; // pixels of drag per 1 world unit of scroll
 
 function beginDexScroll(event) {
   primeDexScrollDrag = {
