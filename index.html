@@ -1303,12 +1303,13 @@ function triggerPrimeDiscovery(divisor, sourceSeg) {
   // Scroll the PrimeDex so the target cubby is centered on screen (x = 0)
   // before the cube begins its flight, ensuring it lands in the visible cubby.
   const cubby = primeDexWells.find((w) => w.prime === divisor);
-  const idealScrollX = cubby ? -cubby.localX : primeDexGroup.position.x;
-  const targetScrollX = Math.max(primeDexScrollMin, Math.min(primeDexScrollMax, idealScrollX));
+  const targetScrollX = cubby
+    ? Math.max(primeDexScrollMin, Math.min(primeDexScrollMax, -cubby.localX))
+    : primeDexGroup.position.x;
 
   gsap.to(primeDexGroup.position, {
     x: targetScrollX,
-    duration: 0.6,
+    duration: 0.5,
     ease: "power2.inOut",
     onUpdate: () => {
       if (primeDexBody) {
@@ -1320,19 +1321,29 @@ function triggerPrimeDiscovery(divisor, sourceSeg) {
       }
     },
     onComplete: () => {
+      if (primeDexBody) {
+        primeDexBody.setNextKinematicTranslation({
+          x: targetScrollX,
+          y: primeDexGroup.position.y,
+          z: primeDexGroup.position.z,
+        });
+      }
+
       // Scroll has settled — calculate target now so it reflects the new scroll position.
       const target = getCubbyTarget(divisor);
-      // Hover LOW — just 1.4 units above the cubby rim — so the drop is short
-      // and the cube hits the cubby floor with low velocity (can't bounce out).
-      const hoverY = target.y + 1.4;
+      const hoverY = target.y + 1.5;
+      const hoverZ = target.z;
 
       gsap.to(mesh.position, {
         x: target.x,
         y: hoverY,
-        z: target.z,
+        z: hoverZ,
         duration: 1.1,
         ease: "power2.inOut",
         onComplete: () => {
+          mesh.position.set(target.x, hoverY, hoverZ);
+          mesh.rotation.set(0, 0, 0);
+
           // Hand off to Rapier gravity. LOCK rotations so the cube can't tumble
           // — it should fall perfectly square into the cubby, with zero restitution.
           // CCD (continuous collision detection) is critical because the cubby
@@ -1353,7 +1364,15 @@ function triggerPrimeDiscovery(divisor, sourceSeg) {
             .setDensity(1.5);
           world.createCollider(colliderDesc, rb);
 
+          rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
+
           bodies.push({ mesh, rigidBody: rb });
+
+          const dropDistance = Math.max(0, hoverY - target.y);
+          const dropDurationMs = Math.sqrt((2 * dropDistance) / 15) * 1000;
+          window.setTimeout(() => {
+            playThud();
+          }, dropDurationMs + 40);
         },
       });
     },
