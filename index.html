@@ -1380,6 +1380,13 @@ function triggerPrimeDiscovery(divisor, sourceSeg) {
             const dropDurationMs = Math.sqrt(2 * dropDistance / PHYSICS_GRAVITY_ACCELERATION) * 1000; // Free-fall time: t = sqrt(2*dropDistance/PHYSICS_GRAVITY_ACCELERATION)
             window.setTimeout(() => {
               playThud();
+              world.removeRigidBody(rb);
+              const index = bodies.findIndex(b => b.rigidBody === rb);
+              if (index > -1) bodies.splice(index, 1);
+              primeDexGroup.add(mesh);
+              const localFloorY = -((altarSlabTopY - 0.05) - (ALTAR_PED_H - 0.15)) / 2 + 0.4; // -stripH / 2 + floorThick
+              mesh.position.set(cubby.localX, localFloorY + CUBE_SIZE / 2, 0);
+              mesh.rotation.set(0, 0, 0);
             }, dropDurationMs + IMPACT_SOUND_DELAY_MS);
           }
         },
