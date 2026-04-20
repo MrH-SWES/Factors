@@ -1607,7 +1607,7 @@ function createHingePoints(baseY) {
     });
     const bead = new THREE.Mesh(beadGeo, beadMat);
     bead.position.set(-CUBE_SIZE / 2 - beadRadius + 0.02, hingeY, STAGE_Z);
-    bead.rotation.x = Math.PI / 2; // rotate 90° so cylinder axis runs along Z (horizontal pin)
+    bead.rotation.x = Math.PI / 2; // rotate 90° so cylinder axis runs front-to-back (Z), like a hinge pin
     bead.castShadow = true;
     scene.add(bead);
 
@@ -2126,13 +2126,12 @@ function activateHinge(hingePoint) {
 
   const tl = gsap.timeline({
     onComplete: () => {
-      // STEP 1: Apply material + engrave numerals on the now-settled segments.
+      // STEP 1: Engrave numerals on the now-settled segments (composite only).
       // Prime divisors already have their supernova shader applied immediately
       // on segment creation (before the fold animation). Composite divisors get
       // their gravity-aware numeral engraved here, after the fold settles so
       // we can read the world orientation correctly.
       const segH = obeliskState.divisor * CUBE_SIZE;
-      const divisorIsPrime = isPrime(obeliskState.divisor);
       if (!divisorIsPrime) {
         for (const seg of obeliskSegments) {
           engraveNumeralOnSegment(seg.mesh, obeliskState.divisor, segH);
