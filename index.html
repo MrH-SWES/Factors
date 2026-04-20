@@ -188,8 +188,8 @@ const ALTAR_Y = 1.4;      // lowered — keeps altar out of the upper frame
 const CUBE_SIZE = 1;
 const NUM_CUBES = 12;
 
-const PRIMEDEX_Z = ALTAR_Z - 0.55;   // recessed track along back edge of altar slab
-const PRIMEDEX_Y = 2.05;             // sits flush on top of the altar slab surface
+const PRIMEDEX_Z = 15;        // dex shelf in the foreground
+const PRIMEDEX_Y = 0.2;       // low — trinkets sit just above the floor plane
 const PRIMEDEX_SLOT_SPACING = 1.15;
 const PRIMEDEX_LANDING_X = 0;
 const PRIMEDEX_DROP_HEIGHT = 2.5;
@@ -584,26 +584,23 @@ const compositeScreenSize = { w: window.innerWidth, h: window.innerHeight };
 
 function createCompositeMaterial() {
   const mat = new THREE.MeshStandardMaterial({
-    color: 0xc0c0c0,        // neutral aluminium grey — readable under vault lighting
-    metalness: 0.88,
-    roughness: 0.30,
+    color: 0x5a5c60,
+    metalness: 0.5,
+    roughness: 0.42,
     map: brushedMetalTexture,
-    envMap: mirrorRenderTarget ? mirrorRenderTarget.texture : null,
-    envMapIntensity: 1.2,
   });
 
   // "Bead" highlight logic — normal-based so it stays locked to each block's
-  // physical surface regardless of camera angle. Signature top-left highlight,
-  // bottom-right shadow — the Brushed Aluminum Bead look.
+  // physical surface regardless of camera angle.
   mat.onBeforeCompile = (shader) => {
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <output_fragment>',
       `#include <output_fragment>
        vec3 viewNormal = normalize(vNormal);
-       float highlight = smoothstep(0.4, 1.0, dot(viewNormal, normalize(vec3(-1.0, 1.0, 1.0))));
-       float shadow = smoothstep(0.4, 1.0, dot(viewNormal, normalize(vec3(1.0, -1.0, -1.0))));
-       gl_FragColor.rgb += vec3(0.45) * highlight;
-       gl_FragColor.rgb -= vec3(0.25) * shadow;`
+       float highlight = smoothstep(0.5, 1.0, dot(viewNormal, normalize(vec3(-1.0, 1.0, 1.0))));
+       float shadow = smoothstep(0.5, 1.0, dot(viewNormal, normalize(vec3(1.0, -1.0, -1.0))));
+       gl_FragColor.rgb += vec3(0.4) * highlight;
+       gl_FragColor.rgb -= vec3(0.3) * shadow;`
     );
   };
 
@@ -685,16 +682,9 @@ async function init() {
   scene.add(mirrorCubeCamera);
 
   // 6. Lighting ──────────────────────────────────────────────────────────
-  // A. Ambient Fill — cool blue-gray, brighter so brushed metal is always readable
-  const ambient = new THREE.HemisphereLight(0x4a5060, 0x1a1a1a, 0.8);
+  // A. Ambient Fill — cool blue-gray, just enough to keep corners from pure black
+  const ambient = new THREE.HemisphereLight(0x4a5060, 0x1a1a1a, 0.4);
   scene.add(ambient);
-
-  // A2. Dedicated PointLight above the obelisk — ensures brushed aluminium
-  // segments are always lit enough to read the metallic texture.
-  const obeliskPointLight = new THREE.PointLight(0xffffff, 180, 30, 1.8);
-  obeliskPointLight.position.set(0, 16, STAGE_Z);
-  obeliskPointLight.castShadow = false;
-  scene.add(obeliskPointLight);
 
   // B. Diffuse Altar Light — warm wash over the altar and PrimeDex
   const altarSpot = new THREE.SpotLight(0xfff5e6, 200);
@@ -866,123 +856,69 @@ function createRoom() {
   // Wall wash lights replaced by back-wall downlights in init()
 }
 
-// ── Exit Sigil (back-wall numeral — 3D extruded stone carving) ───────
-// Massive carved numeral on the back wall of the vault. Rendered as a tangible
-// 3D extruded object (heavy stone carving), not a flat 2D plane. Two material
-// states: dormant matte stone (always visible) and a breathing neon-green glow
-// layer (active when room is solved). The glow is slow, rhythmic, atmospheric
-// — like a bar neon in the rain.
+// ── Exit Sigil (back-wall numeral) ──────────────────────────────────
+// Massive carved numeral on the back wall of the vault. Rendered by baking
+// the digits into a canvas texture and applying it to a plane that sits flush
+// against the wall. Two layers stacked: a stone-embossed base (always visible)
+// and an additive neon-green layer (breathes when active). Activated once all
+// factor hinges in the room have been surfaced.
 function createExitSigil(wallFrontZ) {
+  const sigilW = 10;
+  const sigilH = 7;
   const sigilY = 12; // high up so it reads as monumental, framed in the vault
-  const extrudeDepth = 0.6; // how far the numeral protrudes from the wall
 
-  // Build the numeral shape from a canvas → path approach: create a high-res
-  // canvas, trace the text, then extrude it. Since THREE.js doesn't have a
-  // built-in font→Shape utility without FontLoader, we approximate the "12"
-  // as two extruded digit shapes composed of box primitives for robustness.
-  const sigilGroup = new THREE.Group();
-  sigilGroup.position.set(0, sigilY, wallFrontZ);
-  scene.add(sigilGroup);
+  // Shared canvas factory so both the stone and glow layers render the same
+  // glyph at the same position.
+  function makeSigilCanvas(color, alpha) {
+    const c = document.createElement("canvas");
+    c.width = 1024; c.height = 1024 * (sigilH / sigilW);
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},${alpha})`;
+    ctx.font = `bold ${c.height * 0.86}px 'Lexend', sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(NUM_CUBES), c.width / 2, c.height / 2);
+    return c;
+  }
 
-  // Stone material for the dormant numeral — dark, heavy, carved feel
+  // Base stone glyph — dark, subtle, feels carved into the wall
+  const stoneTex = new THREE.CanvasTexture(makeSigilCanvas({ r: 20, g: 18, b: 16 }, 0.85));
+  const stoneGeo = new THREE.PlaneGeometry(sigilW, sigilH);
   const stoneMat = new THREE.MeshStandardMaterial({
-    color: 0x2a2622,
-    roughness: 0.92,
-    metalness: 0.04,
-    bumpMap: concreteBumpTexture,
-    bumpScale: 0.15,
+    map: stoneTex,
+    transparent: true,
+    roughness: 0.9,
+    metalness: 0.02,
   });
+  exitSigilMesh = new THREE.Mesh(stoneGeo, stoneMat);
+  exitSigilMesh.position.set(0, sigilY, wallFrontZ);
+  scene.add(exitSigilMesh);
 
-  // Build the "1" from box primitives — a vertical stroke
-  const oneW = 0.8, oneH = 5.0;
-  const oneGeo = new THREE.BoxGeometry(oneW, oneH, extrudeDepth);
-  const oneMesh = new THREE.Mesh(oneGeo, stoneMat);
-  oneMesh.position.set(-2.2, 0, extrudeDepth / 2);
-  oneMesh.castShadow = true;
-  oneMesh.receiveShadow = true;
-  sigilGroup.add(oneMesh);
-
-  // Small serif/base on the "1"
-  const oneBaseGeo = new THREE.BoxGeometry(oneW * 1.6, 0.5, extrudeDepth);
-  const oneBaseMesh = new THREE.Mesh(oneBaseGeo, stoneMat);
-  oneBaseMesh.position.set(-2.2, -oneH / 2 + 0.25, extrudeDepth / 2);
-  oneBaseMesh.castShadow = true;
-  sigilGroup.add(oneBaseMesh);
-
-  // Build the "2" from box primitives — top bar, right stroke, middle bar,
-  // left stroke, bottom bar
-  const barW = 2.4, barH = 0.7, strokeW = 0.8;
-  const twoX = 1.0; // center offset for the "2"
-
-  // Top horizontal bar
-  const topBarGeo = new THREE.BoxGeometry(barW, barH, extrudeDepth);
-  const topBarMesh = new THREE.Mesh(topBarGeo, stoneMat);
-  topBarMesh.position.set(twoX, oneH / 2 - barH / 2, extrudeDepth / 2);
-  topBarMesh.castShadow = true;
-  sigilGroup.add(topBarMesh);
-
-  // Right vertical stroke (upper half)
-  const rightStrokeGeo = new THREE.BoxGeometry(strokeW, oneH / 2 - barH / 2, extrudeDepth);
-  const rightStrokeMesh = new THREE.Mesh(rightStrokeGeo, stoneMat);
-  rightStrokeMesh.position.set(twoX + barW / 2 - strokeW / 2, oneH / 4, extrudeDepth / 2);
-  rightStrokeMesh.castShadow = true;
-  sigilGroup.add(rightStrokeMesh);
-
-  // Middle horizontal bar
-  const midBarMesh = new THREE.Mesh(topBarGeo.clone(), stoneMat);
-  midBarMesh.position.set(twoX, 0, extrudeDepth / 2);
-  midBarMesh.castShadow = true;
-  sigilGroup.add(midBarMesh);
-
-  // Left vertical stroke (lower half)
-  const leftStrokeGeo = new THREE.BoxGeometry(strokeW, oneH / 2 - barH / 2, extrudeDepth);
-  const leftStrokeMesh = new THREE.Mesh(leftStrokeGeo, stoneMat);
-  leftStrokeMesh.position.set(twoX - barW / 2 + strokeW / 2, -oneH / 4, extrudeDepth / 2);
-  leftStrokeMesh.castShadow = true;
-  sigilGroup.add(leftStrokeMesh);
-
-  // Bottom horizontal bar
-  const botBarMesh = new THREE.Mesh(topBarGeo.clone(), stoneMat);
-  botBarMesh.position.set(twoX, -oneH / 2 + barH / 2, extrudeDepth / 2);
-  botBarMesh.castShadow = true;
-  sigilGroup.add(botBarMesh);
-
-  exitSigilMesh = sigilGroup;
-
-  // ── Neon glow layer ────────────────────────────────────────────────
-  // A slightly larger duplicate group using emissive material for the breathing
-  // neon green. Additive blending so it intensifies rather than replaces.
+  // Neon glow layer — drawn ON TOP of the stone, additive blending so it
+  // intensifies rather than replaces. Breathing controls its opacity.
+  const glowTex = new THREE.CanvasTexture(makeSigilCanvas({ r: 0, g: 255, b: 136 }, 1.0));
+  const glowGeo = new THREE.PlaneGeometry(sigilW * 1.08, sigilH * 1.08);
   exitSigilGlowMat = new THREE.MeshBasicMaterial({
-    color: 0x00ff88,
+    map: glowTex,
     transparent: true,
     opacity: 0.0,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
+  const glowMesh = new THREE.Mesh(glowGeo, exitSigilGlowMat);
+  glowMesh.position.set(0, sigilY, wallFrontZ + 0.01);
+  scene.add(glowMesh);
 
-  const glowGroup = new THREE.Group();
-  glowGroup.position.set(0, sigilY, wallFrontZ + 0.02);
-  scene.add(glowGroup);
-
-  // Clone each piece as a slightly scaled-up glow version
-  sigilGroup.children.forEach((child) => {
-    if (child.isMesh) {
-      const glowMesh = new THREE.Mesh(child.geometry.clone(), exitSigilGlowMat);
-      glowMesh.position.copy(child.position);
-      glowMesh.scale.set(1.08, 1.08, 1.15);
-      glowGroup.add(glowMesh);
-    }
-  });
-
-  // Invisible hit target — a large box covering the whole sigil area.
-  const hitGeo = new THREE.BoxGeometry(8, 7, extrudeDepth + 1);
+  // Tap target — a large invisible plane covering the whole sigil area.
+  const hitGeo = new THREE.PlaneGeometry(sigilW * 1.2, sigilH * 1.2);
   const hitMat = new THREE.MeshBasicMaterial({
     transparent: true,
     opacity: 0.0,
     depthWrite: false,
   });
   exitSigilHitMesh = new THREE.Mesh(hitGeo, hitMat);
-  exitSigilHitMesh.position.set(0, sigilY, wallFrontZ + extrudeDepth / 2);
+  exitSigilHitMesh.position.set(0, sigilY, wallFrontZ + 0.02);
   scene.add(exitSigilHitMesh);
 }
 
@@ -1108,19 +1044,20 @@ function createAltar() {
   createPrimeDex();
 }
 
-// ── PrimeDex (altar-integrated sliding stone tray) ───────────────────
-// A low-profile stone tray that slides in a recessed track along the back
-// edge of the altar tabletop. Each cell is a shallow well; primes drop
-// vertically from the obelisk into the centered cell.
+// ── PrimeDex (stone shelf with open-top, open-front compartments) ────
+// Pedagogically a storage shelf: each compartment is a cell for one prime
+// trinket. The fronts are open so the camera looks straight IN and sees the
+// engraved face of each trinket. The tops are open so gravity-dropped cubes
+// land cleanly. Dividers between cells are visible stone partitions.
 function createPrimeDex() {
   const wellSize = 1.08;                       // inner W & D of each cell
   const spacing = PRIMEDEX_SLOT_SPACING;
   const slabW = spacing * (NUM_CUBES + 1);
-  const trayH = 0.45;                          // shallow tray height
-  const trayD = 1.2;                           // tray depth (front-to-back)
-  const wellDepth = 0.35;                      // how deep each cell goes
-  const wallThickness = 0.06;
-  const topY = trayH / 2;
+  const slabH = 1.25;                          // overall shelf height
+  const slabD = 1.4;                           // shallower — we see into it
+  const wellDepth = 0.95;                      // how deep each cell goes
+  const wallThickness = 0.08;
+  const topY = slabH / 2;
   const wellBottomY = topY - wellDepth;
 
   primeDexGroup = new THREE.Group();
@@ -1146,40 +1083,42 @@ function createPrimeDex() {
     bumpScale: 0.1,
   });
 
-  // ── Tray base (long floor that all cells sit on) ──
-  const baseGeo = new THREE.BoxGeometry(slabW, 0.12, trayD);
+  // ── Shelf base (long floor that all cells sit on) ──
+  const baseGeo = new THREE.BoxGeometry(slabW, 0.2, slabD);
   const baseMesh = new THREE.Mesh(baseGeo, stoneMat);
-  baseMesh.position.set(0, wellBottomY + 0.01, 0);
+  baseMesh.position.set(0, wellBottomY + 0.02, 0);
   baseMesh.castShadow = true;
   baseMesh.receiveShadow = true;
   primeDexGroup.add(baseMesh);
 
-  // ── Back rail (the stone rail behind the cells) ──
-  const backGeo = new THREE.BoxGeometry(slabW, trayH, 0.10);
+  // ── Back wall (the stone plank behind the cells) ──
+  const backGeo = new THREE.BoxGeometry(slabW, slabH, 0.12);
   const backMesh = new THREE.Mesh(backGeo, stoneMat);
-  backMesh.position.set(0, 0, -trayD / 2 + 0.05);
+  backMesh.position.set(0, 0, -slabD / 2 + 0.06);
   backMesh.castShadow = true;
   backMesh.receiveShadow = true;
   primeDexGroup.add(backMesh);
 
-  // Physics — kinematic rigid body so we can slide the whole tray to position
+  // Physics — kinematic rigid body so we can slide the whole shelf to position
   // the correct cell under the landing zone.
   const dexBodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, PRIMEDEX_Y, PRIMEDEX_Z);
   primeDexBody = world.createRigidBody(dexBodyDesc);
   primeDexWells = [];
 
-  // Physical floor of the tray (catches falling trinkets)
-  const baseCd = RAPIER.ColliderDesc.cuboid(slabW / 2, 0.06, trayD / 2).setTranslation(0, wellBottomY + 0.01, 0);
+  // Physical floor of the shelf (catches falling trinkets)
+  const baseCd = RAPIER.ColliderDesc.cuboid(slabW / 2, 0.1, slabD / 2).setTranslation(0, wellBottomY + 0.02, 0);
   world.createCollider(baseCd, primeDexBody);
-  // Physical back rail
-  const backCd = RAPIER.ColliderDesc.cuboid(slabW / 2, trayH / 2, 0.05).setTranslation(0, 0, -trayD / 2 + 0.05);
+  // Physical back wall
+  const backCd = RAPIER.ColliderDesc.cuboid(slabW / 2, slabH / 2, 0.06).setTranslation(0, 0, -slabD / 2 + 0.06);
   world.createCollider(backCd, primeDexBody);
 
-  // ── Low dividers between each pair of cells ──
+  // ── One partition wall between each pair of cells + label on back wall ──
+  // We lay out NUM_CUBES cells side by side. Dividers sit BETWEEN cells,
+  // so we need NUM_CUBES + 1 dividers (including the two outer end-walls).
   for (let i = 0; i <= NUM_CUBES; i++) {
     const dividerX = (i - NUM_CUBES / 2) * spacing - spacing / 2;
 
-    const divGeo = new THREE.BoxGeometry(wallThickness, wellDepth, trayD - 0.10);
+    const divGeo = new THREE.BoxGeometry(wallThickness, wellDepth, slabD - 0.12);
     const divMesh = new THREE.Mesh(divGeo, stoneMat);
     divMesh.position.set(dividerX, wellBottomY + wellDepth / 2, 0.02);
     divMesh.castShadow = true;
@@ -1188,7 +1127,7 @@ function createPrimeDex() {
 
     // Physics collider for the divider
     world.createCollider(
-      RAPIER.ColliderDesc.cuboid(wallThickness / 2, wellDepth / 2, (trayD - 0.10) / 2)
+      RAPIER.ColliderDesc.cuboid(wallThickness / 2, wellDepth / 2, (slabD - 0.12) / 2)
         .setTranslation(dividerX, wellBottomY + wellDepth / 2, 0.02),
       primeDexBody
     );
@@ -1198,13 +1137,16 @@ function createPrimeDex() {
   for (let i = 1; i <= NUM_CUBES; i++) {
     const localX = (i - (NUM_CUBES + 1) / 2) * spacing;
 
-    // Dark inner back face
+    // Dark inner back face — a thin plane just in front of the back wall so
+    // the number is readable without fighting the stone texture.
     const innerBackGeo = new THREE.PlaneGeometry(wellSize, wellDepth * 0.95);
     const innerBackMesh = new THREE.Mesh(innerBackGeo, cellBackMat);
-    innerBackMesh.position.set(localX, wellBottomY + wellDepth / 2, -trayD / 2 + 0.11);
+    innerBackMesh.position.set(localX, wellBottomY + wellDepth / 2, -slabD / 2 + 0.13);
     primeDexGroup.add(innerBackMesh);
 
-    // Engraved numeral on the back of the cell
+    // Engraved numeral on the back of the cell — viewer reads it above or
+    // through the empty cell. A prime trinket, once dropped in, sits in front
+    // of this numeral.
     const numCanvas = document.createElement("canvas");
     numCanvas.width = 128; numCanvas.height = 128;
     const nctx = numCanvas.getContext("2d");
@@ -1216,16 +1158,16 @@ function createPrimeDex() {
     nctx.textBaseline = "middle";
     nctx.fillText(String(i), 64, 64);
     const numTex = new THREE.CanvasTexture(numCanvas);
-    const numGeo = new THREE.PlaneGeometry(wellSize * 0.7, wellSize * 0.7);
+    const numGeo = new THREE.PlaneGeometry(wellSize * 0.8, wellSize * 0.8);
     const numMat = new THREE.MeshBasicMaterial({ map: numTex, transparent: true });
     const numMesh = new THREE.Mesh(numGeo, numMat);
-    numMesh.position.set(localX, wellBottomY + wellDepth * 0.45, -trayD / 2 + 0.12);
+    numMesh.position.set(localX, wellBottomY + wellDepth * 0.45, -slabD / 2 + 0.14);
     primeDexGroup.add(numMesh);
 
     primeDexWells.push({
       index: i,
       localX,
-      localY: wellBottomY + 0.15, // where trinket rests on tray floor
+      localY: wellBottomY + 0.25, // where trinket rests on shelf floor
       localZ: 0,
     });
   }
@@ -1271,11 +1213,12 @@ function getLandingDropTarget() {
   };
 }
 
-// ── Prime Discovery: spawn cube, slide dex, drop into tray ──────────
+// ── Prime Discovery: spawn cube, slide dex, drop into well ──────────
 // Called when a fold reveals a prime divisor. The cube is born at the
 // fallen-segment's world position in the full supernova material, arcs
-// from the obelisk toward the altar-integrated tray, then drops vertically
-// into the centered well sitting on the altar.
+// briefly in the air while the PrimeDex slides underneath to present
+// the correct well, then gets handed to Rapier gravity to drop vertically
+// into the centered well.
 function triggerPrimeDiscovery(divisor, sourceSeg) {
   if (!sourceSeg || !sourceSeg.mesh) return;
 
@@ -1299,15 +1242,15 @@ function triggerPrimeDiscovery(divisor, sourceSeg) {
   const pl = new THREE.PointLight(0xff7a00, 2.2, 4, 2);
   mesh.add(pl);
 
-  // Phase 1 — arc from the obelisk to a hover position directly above the
-  // altar tray landing zone while the dex slides.
+  // Phase 1 — arc to a hover position directly above the landing zone while
+  // the dex slides. We GSAP-tween the mesh position (no physics yet).
   const hoverY = PRIMEDEX_Y + 1.2 + PRIMEDEX_DROP_HEIGHT;
 
   // Begin the dex slide in parallel with the arc so the student sees the
   // mechanism respond immediately to the discovery.
   const slidePromise = autoSlideDex(divisor);
 
-  // Tween the cube in an arc from the obelisk to above the altar tray.
+  // Tween the cube up to the hover point above the landing zone.
   gsap.to(mesh.position, {
     x: PRIMEDEX_LANDING_X,
     y: hoverY,
@@ -1317,7 +1260,7 @@ function triggerPrimeDiscovery(divisor, sourceSeg) {
   });
 
   // Once the slide completes, hand off to Rapier gravity so the cube drops
-  // vertically into the now-centered well on the altar tray.
+  // vertically into the now-centered well.
   slidePromise.then(() => {
     // Small defensive delay so the arc has definitely landed even if slide
     // finishes slightly early.
@@ -1400,7 +1343,7 @@ function createTrinket(label, materialType) {
     if (materialType === "mirror") {
       ctx.fillStyle = "#bbbbbb";
     } else {
-      ctx.fillStyle = "#c0c0c0";
+      ctx.fillStyle = "#5a5c60";
     }
     ctx.fillRect(0, 0, 256, 256);
     ctx.fillStyle = materialType === "mirror" ? "rgba(0,0,0,0.3)" : "rgba(0,0,0,0.25)";
@@ -1419,18 +1362,14 @@ function createTrinket(label, materialType) {
   altarTrinkets.push({ mesh, label, materialType });
   altarTrinkets.sort((a, b) => a.label - b.label);
 
-  // Reposition all trinkets centered on the altar.
-  // Slab top surface: pedestal height (0.8) + slab height (1.2) = 2.0.
-  // Place trinkets flush on top of the slab, not sunk into it.
-  const pedH = 0.8, slabH = 1.2; // must match createAltar() geometry
-  const slabTopY = pedH + slabH;
+  // Reposition all trinkets centered on the altar
   const trinketSpacing = 1.15; // matches dex well spacing
   const totalWidth = (altarTrinkets.length - 1) * trinketSpacing;
   const startX = -totalWidth / 2;
   for (let i = 0; i < altarTrinkets.length; i++) {
     const targetX = startX + i * trinketSpacing;
     if (altarTrinkets[i].mesh === mesh) {
-      mesh.position.set(targetX, slabTopY + trinketSize / 2, ALTAR_Z);
+      mesh.position.set(targetX, ALTAR_Y + trinketSize / 2 + 0.01, ALTAR_Z);
     } else {
       gsap.to(altarTrinkets[i].mesh.position, {
         x: targetX,
@@ -1651,13 +1590,14 @@ function createHingePoints(baseY) {
   for (const def of hingeDefs) {
     const hingeY = baseY + def.height * CUBE_SIZE;
 
-    // ── Integrated Treasure Chest Hinge Pin ──────────────────────────────
-    // A horizontal cylinder (brushed aluminium) that runs through the obelisk
-    // at the exact pivot line between segments, matching a heavy chest hinge.
-    const pinRadius = 0.10;
-    const pinLength = CUBE_SIZE * 1.6; // spans beyond the obelisk on both sides
-    const pinGeo = new THREE.CylinderGeometry(pinRadius, pinRadius, pinLength, 20, 1);
-    const pinMat = new THREE.MeshStandardMaterial({
+    // Brushed Aluminum Bead — a cylinder rotated 90° horizontally so it
+    // reads as a mechanical hinge pin running through the obelisk edge.
+    // The breathing neon glow lives on a separate additive-blend cylinder
+    // so we can modulate it without touching the bead's metallic shading.
+    const beadRadius = 0.22;
+    const beadLength = CUBE_SIZE * 0.6;
+    const beadGeo = new THREE.CylinderGeometry(beadRadius, beadRadius, beadLength, 24, 1);
+    const beadMat = new THREE.MeshStandardMaterial({
       color: 0xdcdcdc,         // neutral aluminum
       metalness: 0.92,
       roughness: 0.28,
@@ -1665,33 +1605,15 @@ function createHingePoints(baseY) {
       envMap: mirrorRenderTarget ? mirrorRenderTarget.texture : null,
       envMapIntensity: 1.4,
     });
-    const pin = new THREE.Mesh(pinGeo, pinMat);
-    // Rotate 90° so cylinder axis runs along X (left–right through the obelisk)
-    pin.rotation.z = Math.PI / 2;
-    pin.position.set(0, hingeY, STAGE_Z);
-    pin.castShadow = true;
-    scene.add(pin);
-
-    // ── End-Cap Beads ──────────────────────────────────────────────────
-    // The signature branding bead is the end-cap of the hinge pin — a small
-    // sphere capping each end of the cylinder.
-    const capRadius = pinRadius * 1.8;
-    const capGeo = new THREE.SphereGeometry(capRadius, 16, 16);
-    const capMatL = pinMat.clone();
-    const capLeft = new THREE.Mesh(capGeo, capMatL);
-    capLeft.position.set(-pinLength / 2, hingeY, STAGE_Z);
-    capLeft.castShadow = true;
-    scene.add(capLeft);
-
-    const capMatR = pinMat.clone();
-    const capRight = new THREE.Mesh(capGeo, capMatR);
-    capRight.position.set(pinLength / 2, hingeY, STAGE_Z);
-    capRight.castShadow = true;
-    scene.add(capRight);
+    const bead = new THREE.Mesh(beadGeo, beadMat);
+    bead.position.set(-CUBE_SIZE / 2 - beadRadius + 0.02, hingeY, STAGE_Z);
+    bead.rotation.x = Math.PI / 2; // rotate 90° so cylinder axis runs front-to-back (Z), like a hinge pin
+    bead.castShadow = true;
+    scene.add(bead);
 
     // Neon glow layer — slightly larger cylinder in additive blend. Its opacity
     // breathes from ~0 up to a grimy neon green and back down when idle.
-    const glowGeo = new THREE.CylinderGeometry(pinRadius * 1.6, pinRadius * 1.6, pinLength * 1.05, 20, 1);
+    const glowGeo = new THREE.CylinderGeometry(beadRadius * 1.35, beadRadius * 1.35, beadLength * 1.1, 24, 1);
     const glowMat = new THREE.MeshBasicMaterial({
       color: 0x00ff88,
       transparent: true,
@@ -1700,11 +1622,11 @@ function createHingePoints(baseY) {
       depthWrite: false,
     });
     const glow = new THREE.Mesh(glowGeo, glowMat);
-    glow.rotation.z = Math.PI / 2;
-    glow.position.copy(pin.position);
+    glow.position.copy(bead.position);
+    glow.rotation.x = Math.PI / 2;
     scene.add(glow);
 
-    // Invisible hit sphere — forgiving tap target, large enough for mobile
+    // Invisible hit sphere — forgiving tap target, 5× visible bead radius.
     const hitGeo = new THREE.SphereGeometry(0.6, 8, 8);
     const hitMat = new THREE.MeshBasicMaterial({
       transparent: true,
@@ -1712,7 +1634,7 @@ function createHingePoints(baseY) {
       depthWrite: false,
     });
     const hitMesh = new THREE.Mesh(hitGeo, hitMat);
-    hitMesh.position.copy(pin.position);
+    hitMesh.position.copy(bead.position);
     hitMesh.renderOrder = 999;
     scene.add(hitMesh);
 
@@ -1720,12 +1642,10 @@ function createHingePoints(baseY) {
       height: def.height,
       divisor: def.divisor,
       hingeY,
-      ring: pin,           // kept the .ring name for back-compat with other refs
-      capLeft,             // left end-cap bead
-      capRight,            // right end-cap bead
-      glow,                // neon breathing layer
+      ring: bead,         // kept the .ring name for back-compat with other refs
+      glow,               // neon breathing layer
       glowMat,
-      hitMesh,             // large invisible tap target
+      hitMesh,            // large invisible tap target
       label: null,
       labelMat: null,
       activated: false,
@@ -2014,8 +1934,6 @@ function completeHandleDrag() {
         hp.glow.visible = true;
         hp.hitMesh.visible = true;
         hp.glowMat.opacity = 0;
-        if (hp.capLeft) hp.capLeft.visible = true;
-        if (hp.capRight) hp.capRight.visible = true;
       }
 
       unspoolDrag = null;
@@ -2117,8 +2035,6 @@ function activateHinge(hingePoint) {
     hp.glow.visible = false;
     hp.hitMesh.visible = false;
     hp.glowMat.opacity = 0;
-    if (hp.capLeft) hp.capLeft.visible = false;
-    if (hp.capRight) hp.capRight.visible = false;
     if (hp.labelMat) hp.labelMat.opacity = 0;
   }
 
@@ -2322,8 +2238,8 @@ function createSegmentMesh(segH, numeral = null) {
     canvas.width = 256;
     canvas.height = 256 * units;
     const ctx = canvas.getContext("2d");
-    // Aluminum base tint — matches the brushed aluminum bead material color
-    ctx.fillStyle = "#c0c0c0";
+    // Aluminum base tint — matches the composite material color
+    ctx.fillStyle = "#5a5c60";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     // Engraved-look numeral — dark, slight inset feel
     ctx.fillStyle = "rgba(20,22,28,0.55)";
@@ -2366,7 +2282,7 @@ function engraveNumeralOnSegment(mesh, numeral, segH) {
   canvas.width = 256;
   canvas.height = 256 * units;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#c0c0c0";
+  ctx.fillStyle = "#5a5c60";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   if (inverted) {
