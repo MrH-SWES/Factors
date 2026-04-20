@@ -1860,27 +1860,33 @@ function onPointerDown(event) {
 // chain by its far end — the hinge nearest the handle opens first, and the
 // drag distance required scales with how many "links" are still folded.
 
-const UNSPOOL_BASE_DRAG_PX = 140;  // pixels per hinge — more hinges = more pull
-const UNSPOOL_DEAD_ZONE_PX = 40;   // pull this far before anything starts moving
-const UNSPOOL_OVERLAP = 0.45;      // 0 = sequential, 1 = simultaneous
+const UNSPOOL_BASE_DRAG_DIST = 3.0;  // world-units per hinge — more hinges = more pull
+const UNSPOOL_DEAD_ZONE_DIST = 0.8;  // world-units to travel before anything starts moving
+const UNSPOOL_OVERLAP = 0.45;        // 0 = sequential, 1 = simultaneous
 const UNSPOOL_COMMIT_THRESHOLD = 0.80;
 const UNSPOOL_RESISTANCE_POWER = 2.2; // >1 = heavy start, accelerating lift
 
 function beginHandleDrag(event) {
-  // Determine whether the handle is currently on the floor or in the air so
-  // we can key the drag gesture off the correct direction: pulling upward
-  // from the floor, or "upward-and-inward" if the handle is in the air above
-  // the end segment.
+  // The handle edge's world position (local +Y of the end segment).
   const endSeg = obeliskSegments[obeliskSegments.length - 1];
   endSeg.mesh.updateWorldMatrix(true, false);
-  const endWorldUp = new THREE.Vector3(0, 1, 0).applyQuaternion(endSeg.mesh.getWorldQuaternion(new THREE.Quaternion()));
-  // The handle edge's world position (local +Y of the end segment).
   const handleWorldPos = new THREE.Vector3(0, obeliskState.divisor * CUBE_SIZE / 2, 0);
   endSeg.mesh.localToWorld(handleWorldPos);
 
-  // Base center world position — stays put across folds.
-  const baseWorldPos = new THREE.Vector3();
-  if (obeliskGroup) obeliskGroup.getWorldPosition(baseWorldPos);
+  // Build an invisible drag plane through the handle, oriented to face the
+  // camera. This lets raycasting give us exact 3D world coordinates for every
+  // pointer position regardless of obelisk orientation.
+  const dragPlane = new THREE.Plane();
+  const planeNormal = camera.position.clone().sub(handleWorldPos).normalize();
+  dragPlane.setFromNormalAndCoplanarPoint(planeNormal, handleWorldPos);
+
+  // Intersect the initial pointer ray with the plane to record where in 3D
+  // space the grab started.
+  pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const startWorldPos = new THREE.Vector3();
+  raycaster.ray.intersectPlane(dragPlane, startWorldPos);
 
   // Sort hinges INNERMOST→OUTERMOST. The innermost hinge (depth=1, nearest
   // the handle end) opens first — the end link of the chain lifts before the
@@ -1892,24 +1898,18 @@ function beginHandleDrag(event) {
   const windowSize = 1 / (1 + (n - 1) * (1 - UNSPOOL_OVERLAP));
   const starts = sortedHinges.map((_, i) => i * (1 - UNSPOOL_OVERLAP) * windowSize);
 
-  // Scale total drag distance by number of hinges so longer chains feel heavier.
-  const totalDragPx = UNSPOOL_BASE_DRAG_PX * n;
-
-  // "Center-ward" X direction — which way is the base from the handle?
-  // Positive centerSign means base is to the right of handle; we add
-  // rightward drag to progress. Negative means base is to the left; we add
-  // leftward drag. This matches the old app's oddFalls/landsLeft logic.
-  const centerSign = Math.sign(baseWorldPos.x - handleWorldPos.x) || 0;
+  // Scale total drag distance (in world units) by number of hinges so longer
+  // chains feel heavier.
+  const totalDragDist = UNSPOOL_BASE_DRAG_DIST * n;
 
   unspoolDrag = {
-    startX: event.clientX,
-    startY: event.clientY,
+    dragPlane,
+    startWorldPos,
     active: true,
     sortedHinges,
     starts,
     windowSize,
-    totalDragPx,
-    centerSign,
+    totalDragDist,
   };
 
   lastInteractionTime = performance.now() / 1000;
@@ -1923,22 +1923,22 @@ function beginHandleDrag(event) {
 function computeHandleDragProgress(event) {
   if (!unspoolDrag) return 0;
 
-  // Pull-up is always positive dragY — reach up toward the ceiling.
-  // Screen Y grows downward, so start.Y - current.Y = upward pull.
-  const dragY = unspoolDrag.startY - event.clientY;
+  // Project the current pointer onto the drag plane to get a true 3D world
+  // position, then measure how far it has moved from the grab point.
+  pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const currentWorldPos = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(unspoolDrag.dragPlane, currentWorldPos)) return 0;
 
-  // Additional progress from pulling "toward center" (where the base is),
-  // matching the old 2D app's X contribution at 0.4× weight.
-  const dragX = (event.clientX - unspoolDrag.startX) * unspoolDrag.centerSign;
+  // Total 3D distance dragged from the grab origin.
+  const dist = currentWorldPos.distanceTo(unspoolDrag.startWorldPos);
 
-  // Combine — only positive pulls count.
-  const rawCombined = dragY + Math.max(0, dragX) * 0.4;
-
-  // Subtract the dead zone so the first few pixels feel inert (weight).
-  const past = Math.max(0, rawCombined - UNSPOOL_DEAD_ZONE_PX);
+  // Subtract the dead zone so the first few world-units feel inert (weight).
+  const past = Math.max(0, dist - UNSPOOL_DEAD_ZONE_DIST);
 
   // Linear progress in [0, 1]
-  const linear = Math.min(1, past / unspoolDrag.totalDragPx);
+  const linear = Math.min(1, past / unspoolDrag.totalDragDist);
 
   // Apply resistance curve — heavy start, accelerating lift. pow(x, k) with
   // k < 1 would front-load; k > 1 back-loads which is what we want: early
