@@ -180,6 +180,7 @@ let mirrorCubeCamera, mirrorRenderTarget, mirrorMaterial;
 let composer, bloomPass;
 let bloomComposer, finalComposer;
 let mirrorMesh = null; // explicit reference to the '1' mirror block
+let roomMesh = null;  // BackSide box enclosure — excluded from bloom darkening
 const bodies = []; // { mesh, rigidBody, pointLight? } pairs for sync
 const primeShaderMeshes = []; // meshes using supernova shader (need time uniform updates)
 
@@ -813,6 +814,7 @@ async function init() {
 
     function darkenNonBloomed() {
       scene.traverse((obj) => {
+        if (obj === roomMesh) return;
         if (obj.isMesh && !bloomLayer.test(obj.layers)) {
           materialCache[obj.uuid] = obj.material;
           obj.material = darkMaterial;
@@ -840,7 +842,7 @@ async function init() {
     const blendShader = {
       uniforms: {
         baseTexture: { value: null },
-        bloomTexture: { value: bloomComposer.renderTarget2.texture },
+        bloomTexture: { value: bloomComposer.readBuffer.texture },
       },
       vertexShader: `
         varying vec2 vUv;
@@ -899,6 +901,10 @@ async function init() {
   // shadows and give the mirror cube cool tones to reflect.
   const ambient = new THREE.HemisphereLight(0x301050, 0x202020, 0.8);
   scene.add(ambient);
+
+  // A2. Subtle white ambient so stone textures are legible even in deep shadow.
+  const softAmbient = new THREE.AmbientLight(0xffffff, 0.15);
+  scene.add(softAmbient);
 
   // B. Golden Back-Portal — powerful warm point light deep behind the altar,
   // representing the golden radiance opening. Provides warm gold for the
@@ -1014,6 +1020,24 @@ function createRoom() {
     .setRestitution(0.0)
     .setFriction(0.8);
   world.createCollider(stageCd, stageRb);
+
+  // BackSide box enclosure — gives the mirror cube camera and the renderer
+  // an interior environment to reflect and light. Kept on default layer (0)
+  // so it's never darkened during the bloom pass.
+  const boxGeo = new THREE.BoxGeometry(100, 100, 100);
+  const boxMat = new THREE.MeshStandardMaterial({
+    color: 0x707070,
+    roughness: 0.95,
+    metalness: 0.05,
+    side: THREE.BackSide,
+    map: noiseDiffuseMap,
+    normalMap: noiseNormalMap,
+    normalScale: new THREE.Vector2(1, 1),
+  });
+  roomMesh = new THREE.Mesh(boxGeo, boxMat);
+  roomMesh.receiveShadow = true;
+  roomMesh.layers.set(0);
+  scene.add(roomMesh);
 
 }
 
@@ -1401,7 +1425,7 @@ function triggerPrimeDiscovery(divisor, sourceSeg) {
   // Dim the flare down to the resting intensity over the duration of the flight
   // (dex scroll 0.6s + arc flight 1.1s = ~1.7s total, use 1.5s for a smooth fade).
   gsap.to(pl, {
-    intensity: 8.0,
+    intensity: 50.0,
     duration: 1.5,
     ease: "power2.out",
   });
