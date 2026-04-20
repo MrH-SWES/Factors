@@ -1122,7 +1122,7 @@ const DEX_PRIMES = (() => {
 // visible; sockets outside it slide in from the sides as the user scrolls.
 function createPrimeDex() {
   const numCubbies = 144;                      // one socket per number 1–144
-  const spacing = PRIMEDEX_SLOT_SPACING;       // 1.15 — leaves 0.10 of wall between sockets
+  const spacing = PRIMEDEX_SLOT_SPACING;       // 1.15 — inner socket gap: 1.15 - 1.05 = 0.10
   const stripW = spacing * numCubbies + 0.2;   // total strip width (scrolls)
   const socketW = 1.05;                        // inner socket width — gives 1.0 cube room to fall in
   const socketD = 1.05;                        // inner socket depth — gives 1.0 cube room to fall in
