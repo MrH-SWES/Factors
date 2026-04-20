@@ -1,0 +1,2639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Prime Altar | Math Things.</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0a0a0a; font-family: 'Lexend', sans-serif; }
+        canvas { display: block; }
+        #startBtn {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            padding: 20px 40px; font-size: 24px; cursor: pointer;
+            background: #333; color: #fff; border: 2px solid #888; border-radius: 8px;
+            z-index: 10; font-family: 'Lexend', sans-serif;
+        }
+        #startBtn:hover { background: #555; border-color: #aaa; }
+
+        /* ── Calendar / Tracker Screen ── */
+        #calendar-screen {
+            position: fixed; inset: 0;
+            background: #F5F5F7;
+            color: #1D1D1F;
+            z-index: 20;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.45s ease;
+            display: flex;
+            flex-direction: column;
+        }
+        #calendar-screen.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .cal-header {
+            padding: 18px 24px;
+            display: flex; align-items: baseline; justify-content: space-between;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+            background: rgba(245,245,247,0.85);
+            backdrop-filter: blur(40px);
+        }
+        .cal-logo {
+            font-weight: 900; font-size: 1.5rem; letter-spacing: -0.05em;
+            display: inline-flex; align-items: baseline;
+        }
+        .cal-logo .bead {
+            display: inline-block; width: 0.22em; height: 0.22em;
+            margin-left: 0.04em; margin-bottom: 0.08em; border-radius: 50%;
+            background: radial-gradient(circle at 33% 28%, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.3) 40%, transparent 65%),
+                        linear-gradient(135deg, #efefef 0%, #d0d0d0 25%, #a8a8a8 50%, #c0c0c0 75%, #e0e0e0 100%);
+            box-shadow: inset 1px 1px 2px rgba(255,255,255,0.8),
+                        inset -1px -1px 2px rgba(0,0,0,0.2),
+                        0 2px 5px rgba(0,0,0,0.22);
+        }
+        .cal-tagline {
+            font-size: 0.7rem;
+            color: #86868B;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+        }
+        .cal-grid {
+            flex: 1;
+            overflow-y: auto;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+            padding: 20px 18px;
+            align-content: start;
+        }
+        .cal-cell {
+            aspect-ratio: 1;
+            border-radius: 22px;
+            background: #FFFFFF;
+            border: 1px solid rgba(0,0,0,0.05);
+            box-shadow: 0 2px 18px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.03);
+            display: flex; flex-direction: column;
+            align-items: center; padding: 14px 8px;
+            position: relative;
+            cursor: default;
+        }
+        .cal-cell.done {
+            border-color: rgba(76,187,23,0.35);
+        }
+        .cal-cell.done::after {
+            content: '';
+            position: absolute;
+            top: 10px; right: 10px;
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: #4CBB17;
+            box-shadow: 0 0 8px rgba(76,187,23,0.5);
+        }
+        .cal-cell.locked {
+            background: rgba(255,255,255,0.5);
+            opacity: 0.5;
+            box-shadow: none;
+        }
+        .cal-num {
+            font-size: 30px;
+            font-weight: 800;
+            letter-spacing: -1px;
+            color: #1D1D1F;
+            margin-bottom: auto;
+        }
+        .cal-cell.locked .cal-num { color: #AEAEB2; }
+        .cal-trinkets {
+            display: flex; flex-wrap: wrap;
+            justify-content: center; gap: 3px;
+            width: 100%; margin-top: 6px;
+        }
+        .cal-trinket {
+            width: 18px; height: 22px;
+            border-radius: 4px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 9px; font-weight: 800;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1), inset 1px 1px 0 rgba(255,255,255,0.4);
+        }
+        .cal-trinket.composite {
+            background: linear-gradient(135deg, #e0e0e2, #c0c0c4, #9a9aa0, #b0b0b5, #d0d0d4);
+            color: rgba(38,40,46,0.9);
+            border: 1px solid rgba(0,0,0,0.12);
+        }
+        .cal-trinket.prime {
+            background: linear-gradient(135deg, #FFD700, #FF8C00);
+            color: #fff;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+        }
+        .cal-trinket.mirror {
+            background: #F5F5F7;
+            color: #86868B;
+            border: 1px solid #d0d0d0;
+            box-shadow: none;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;600;800;900&display=swap" rel="stylesheet">
+</head>
+<body>
+    <button id="startBtn">Start</button>
+
+    <!-- Calendar / Tracker Screen — shown after the exit sigil is tapped.
+         Scales from 12 tiles (N=12 room) to 144 (full suite) via the grid. -->
+    <div id="calendar-screen">
+        <div class="cal-header">
+            <span class="cal-logo">Math Things<span class="bead"></span></span>
+            <span class="cal-tagline">Math, in your hands.</span>
+        </div>
+        <div class="cal-grid" id="cal-grid"></div>
+    </div>
+
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+        "rapier": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.12.0/rapier.es.js"
+      }
+    }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <script type="module">
+import * as THREE from "three";
+import RAPIER from "rapier";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+
+// ── Mobile Debugger ──────────────────────────────────────────────────
+window.onerror = function (msg, src, line, col, err) {
+  alert("Error: " + msg + "\nSource: " + src + "\nLine: " + line);
+};
+
+// ── Globals ──────────────────────────────────────────────────────────
+let scene, camera, renderer, world;
+let concreteTexture, concreteBumpTexture;
+let brushedMetalTexture;
+let mirrorCubeCamera, mirrorRenderTarget, mirrorMaterial;
+let composer, bloomPass;
+let mirrorMesh = null; // explicit reference to the '1' mirror block
+const bodies = []; // { mesh, rigidBody, pointLight? } pairs for sync
+const primeShaderMeshes = []; // meshes using supernova shader (need time uniform updates)
+
+// ── Cold Open & Hinge State ──────────────────────────────────────────
+// Scene Z-axis: negative = away from camera, positive = toward. Layout
+// depth-wise, back to front: obelisk stage → altar → PrimeDex shelf.
+const STAGE_Z = -6;       // obelisk stage, moved forward so it dominates the frame
+const STAGE_Y = 0.2;      // stage surface height
+const ALTAR_Z = 11;       // altar sits in front of the obelisk
+const ALTAR_Y = 1.4;      // lowered — keeps altar out of the upper frame
+// Altar slab geometry constants — referenced by both createAltar and by any
+// code that needs to place objects ON TOP of the slab surface.
+const ALTAR_PED_H = 0.8;
+const ALTAR_SLAB_H = 1.2;
+const ALTAR_TOP_Y = ALTAR_PED_H + ALTAR_SLAB_H; // 2.0 — the working surface of the altar
+const CUBE_SIZE = 1;
+const NUM_CUBES = 12;
+
+const PRIMEDEX_SLOT_SPACING = 1.15;
+
+let obeliskSegments = [];      // array of { mesh, index }
+let obeliskGroup = null;
+let hingePoints = [];          // interactive hinge point objects
+
+// Track which primes have already been registered to the PrimeDex, so the
+// registration animation only plays once per prime per session.
+const primeDexRegistered = new Set();
+
+// Track which factor hinges have been completed (factors surfaced this session).
+// When all four (2, 3, 4, 6) are surfaced, the exit sigil wakes up.
+const surfacedFactors = new Set();
+
+// Back-wall "exit sigil" — the large numeral carved into the back wall.
+// Starts as matte stone; becomes a breathing neon button once the room is
+// fully factored. References kept here for the breathing loop and tap detection.
+let exitSigilMesh = null;
+let exitSigilGlowMat = null;
+let exitSigilHitMesh = null;
+let exitSigilActive = false; // true once fully factored
+let exitSigilFired = false;  // guard so tap only fires once
+
+// Fold state — tracks whether the obelisk is intact (pieces=1) or laid flat (pieces>1).
+// `hinges` holds references to the nested THREE.Groups so we can animate / unspool them.
+const obeliskState = {
+  pieces: 1,
+  divisor: 0,    // the factor chosen for the current fold (0 when intact)
+  foldDir: -1,   // -1 = first fall leftward (CCW), +1 = rightward
+  hinges: [],    // array of { group, targetRot, dir } ordered OUTERMOST→INNERMOST
+};
+let altarTrinkets = [];        // trinkets placed on the altar
+let primeDexGroup = null;
+let primeDexBody = null;
+let primeDexWells = [];
+let primeDexScrollMin = 0;
+let primeDexScrollMax = 0;
+let primeDexScrollDrag = null; // active scroll-drag state
+let coldOpenComplete = false;
+let foldingActive = false;
+let foldingComplete = false;
+let lastInteractionTime = 0;
+
+// Audio context for thud sounds
+let audioCtx = null;
+
+// GSAP is loaded globally via <script> tag
+const gsap = window.gsap;
+
+// ── Simplex Noise (compact 3D implementation) ────────────────────────
+// Based on Stefan Gustavson's GLSL simplex noise
+const simplexNoiseGLSL = `
+  vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec4 permute(vec4 x) { return mod289(((x * 34.0) + 1.0) * x); }
+  vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+  float snoise(vec3 v) {
+    const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
+    const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+
+    vec3 i = floor(v + dot(v, C.yyy));
+    vec3 x0 = v - i + dot(i, C.xxx);
+
+    vec3 g = step(x0.yzx, x0.xyz);
+    vec3 l = 1.0 - g;
+    vec3 i1 = min(g.xyz, l.zxy);
+    vec3 i2 = max(g.xyz, l.zxy);
+
+    vec3 x1 = x0 - i1 + C.xxx;
+    vec3 x2 = x0 - i2 + C.yyy;
+    vec3 x3 = x0 - D.yyy;
+
+    i = mod289(i);
+    vec4 p = permute(permute(permute(
+      i.z + vec4(0.0, i1.z, i2.z, 1.0))
+      + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+      + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+
+    float n_ = 0.142857142857;
+    vec3 ns = n_ * D.wyz - D.xzx;
+
+    vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+
+    vec4 x_ = floor(j * ns.z);
+    vec4 y_ = floor(j - 7.0 * x_);
+
+    vec4 x = x_ * ns.x + ns.yyyy;
+    vec4 y = y_ * ns.x + ns.yyyy;
+    vec4 h = 1.0 - abs(x) - abs(y);
+
+    vec4 b0 = vec4(x.xy, y.xy);
+    vec4 b1 = vec4(x.zw, y.zw);
+
+    vec4 s0 = floor(b0) * 2.0 + 1.0;
+    vec4 s1 = floor(b1) * 2.0 + 1.0;
+    vec4 sh = -step(h, vec4(0.0));
+
+    vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
+    vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
+
+    vec3 p0 = vec3(a0.xy, h.x);
+    vec3 p1 = vec3(a0.zw, h.y);
+    vec3 p2 = vec3(a1.xy, h.z);
+    vec3 p3 = vec3(a1.zw, h.w);
+
+    vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+    p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+
+    vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+    m = m * m;
+    return 42.0 * dot(m * m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+  }
+`;
+
+// ── Number Classification ────────────────────────────────────────────
+function isPrime(n) {
+  if (n < 2) return false;
+  if (n === 2) return true;
+  if (n % 2 === 0) return false;
+  for (let i = 3; i <= Math.sqrt(n); i += 2) {
+    if (n % i === 0) return false;
+  }
+  return true;
+}
+
+// ── Procedural Concrete Texture (Formwork Panels & Tie Holes) ────────
+function createConcreteTexture(size = 1024) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+
+  // Base: warm-neutral concrete fill
+  ctx.fillStyle = "#6b6560";
+  ctx.fillRect(0, 0, size, size);
+
+  // Fine aggregate grain
+  const imgData = ctx.getImageData(0, 0, size, size);
+  const d = imgData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (Math.random() - 0.5) * 18;
+    d[i] += n; d[i + 1] += n; d[i + 2] += n;
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  // Formwork panel grid
+  const panelW = size / 4;
+  const panelH = size / 3;
+  ctx.strokeStyle = "rgba(0,0,0,0.18)";
+  ctx.lineWidth = 2;
+  for (let px = 0; px < 4; px++) {
+    for (let py = 0; py < 3; py++) {
+      const x = px * panelW;
+      const y = py * panelH;
+      ctx.strokeRect(x + 1, y + 1, panelW - 2, panelH - 2);
+
+      // 4 tie holes per panel
+      ctx.fillStyle = "rgba(20,18,16,0.55)";
+      const inset = 18;
+      const holeR = 4;
+      const cxs = [x + inset, x + panelW - inset, x + inset, x + panelW - inset];
+      const cys = [y + inset, y + inset, y + panelH - inset, y + panelH - inset];
+      for (let h = 0; h < 4; h++) {
+        ctx.beginPath();
+        ctx.arc(cxs[h], cys[h], holeR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(4, 4);
+  return texture;
+}
+
+function createConcreteBumpTexture(size = 1024) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+
+  // Mid-gray base for bump neutrality
+  ctx.fillStyle = "#808080";
+  ctx.fillRect(0, 0, size, size);
+
+  // Aggregate grain bump noise
+  const imgData = ctx.getImageData(0, 0, size, size);
+  const d = imgData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (Math.random() - 0.5) * 60;
+    d[i] += n; d[i + 1] += n; d[i + 2] += n;
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  // Panel seams as raised ridges
+  const panelW = size / 4;
+  const panelH = size / 3;
+  ctx.strokeStyle = "rgba(255,255,255,0.3)";
+  ctx.lineWidth = 3;
+  for (let px = 0; px < 4; px++) {
+    for (let py = 0; py < 3; py++) {
+      ctx.strokeRect(px * panelW + 1, py * panelH + 1, panelW - 2, panelH - 2);
+    }
+  }
+
+  // Tie-hole depressions
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  for (let px = 0; px < 4; px++) {
+    for (let py = 0; py < 3; py++) {
+      const x = px * panelW;
+      const y = py * panelH;
+      const inset = 18;
+      const cxs = [x + inset, x + panelW - inset, x + inset, x + panelW - inset];
+      const cys = [y + inset, y + inset, y + panelH - inset, y + panelH - inset];
+      for (let h = 0; h < 4; h++) {
+        ctx.beginPath();
+        ctx.arc(cxs[h], cys[h], 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(4, 4);
+  return texture;
+}
+
+function createBrushedMetalTexture(size = 512) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+
+  // Solid neutral base
+  ctx.fillStyle = "#d0d0d0";
+  ctx.fillRect(0, 0, size, size);
+
+  // Very faint horizontal brush lines — geometry relies on envMap + spotlights
+  ctx.strokeStyle = "rgba(0,0,0,0.05)";
+  ctx.lineWidth = 1;
+  for (let y = 0; y < size; y += 2) {
+    if (Math.random() > 0.35) continue; // sparse lines
+    ctx.beginPath();
+    ctx.moveTo(0, y + Math.random());
+    ctx.lineTo(size, y + Math.random());
+    ctx.stroke();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(8, 1);
+  return texture;
+}
+
+// ── Supernova Prime Material (Custom ShaderMaterial) ─────────────────
+function createPrimeMaterial(label, inverted = false, segH = CUBE_SIZE) {
+  // Numeral texture — must match the FRONT-face aspect ratio (width:height =
+  // CUBE_SIZE : segH), otherwise the glyph stretches when UVs are sampled on
+  // a rectangular face. The numeral itself is drawn as a SQUARE glyph
+  // centered in a taller canvas so it reads proportionally whether the
+  // segment is 1 unit tall or 6.
+  const canvasW = 512;
+  const aspectH = Math.max(1, segH / CUBE_SIZE); // e.g. 2 for a 2-tall segment
+  const canvasH = Math.round(512 * aspectH);
+  const labelCanvas = document.createElement("canvas");
+  labelCanvas.width = canvasW;
+  labelCanvas.height = canvasH;
+  const lctx = labelCanvas.getContext("2d");
+  lctx.clearRect(0, 0, canvasW, canvasH);
+
+  if (inverted) {
+    // Pre-rotate the canvas 180° so the baked texture renders upside-down
+    // in UV space. When mapped onto an upside-down segment face (which was
+    // flipped 180° by the fold), the two inversions cancel and the numeral
+    // reads upright to the viewer.
+    lctx.translate(canvasW, canvasH);
+    lctx.rotate(Math.PI);
+  }
+
+  // Draw numeral as a square glyph sized to the narrower canvas dimension,
+  // centered in both axes. This keeps the "2" a proper 2-shaped "2" on a
+  // 1×2 tall face instead of stretching it vertically.
+  lctx.fillStyle = "#ffffff";
+  const glyphSize = canvasW * 0.66;
+  lctx.font = `bold ${glyphSize}px 'Lexend', sans-serif`;
+  lctx.textAlign = "center";
+  lctx.textBaseline = "middle";
+  lctx.fillText(String(label || ""), canvasW / 2, canvasH / 2);
+  const labelTex = new THREE.CanvasTexture(labelCanvas);
+
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0.0 },
+      uLabel: { value: labelTex },
+      // Pass segment height ratio so the shader samples noise/distance as if
+      // the segment were a unit cube — prevents plasma stretching on tall
+      // segments (e.g. 2 high, 6 high).
+      uAspectY: { value: CUBE_SIZE / segH },
+    },
+    vertexShader: `
+      varying vec3 vPosition;
+      varying vec3 vNormal;
+      varying vec2 vUv;
+      varying vec3 vWorldNormal;
+      void main() {
+        vPosition = position;
+        vNormal = normal;
+        vUv = uv;
+        vWorldNormal = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      ${simplexNoiseGLSL}
+
+      uniform float uTime;
+      uniform sampler2D uLabel;
+      uniform float uAspectY;
+      varying vec3 vPosition;
+      varying vec3 vNormal;
+      varying vec2 vUv;
+      varying vec3 vWorldNormal;
+
+      void main() {
+        // Aspect-corrected position: Y is compressed by uAspectY so a tall
+        // segment samples the same "cell size" of noise as a unit cube would.
+        vec3 sp = vec3(vPosition.x, vPosition.y * uAspectY, vPosition.z);
+
+        // === PLASMA FIELD — multiple octaves of churning noise ===
+        float n1 = snoise(sp * 3.0 + vec3(uTime * 0.7, uTime * 0.3, uTime * -0.5));
+        float n2 = snoise(sp * 1.5 - vec3(uTime * 0.2, uTime * -0.4, uTime * 0.6));
+        float n3 = snoise(sp * 8.0 + vec3(uTime * 1.2, uTime * -0.8, uTime * 0.4));
+        float pulse = sin(uTime * 3.0) * 0.15 + sin(uTime * 7.0) * 0.05;
+
+        float plasma = n1 * 0.5 + n2 * 0.3 + n3 * 0.2 + pulse;
+
+        // Distance also uses aspect-corrected position so the edge falloff
+        // doesn't stretch with tall segments.
+        float dist = length(sp) / 0.5;
+
+        // === COLOR RAMP — ember core → orange → deep crimson edge ===
+        vec3 whiteHot = vec3(1.0, 0.98, 0.9);
+        vec3 yellow = vec3(1.0, 0.85, 0.2);
+        vec3 orange = vec3(1.0, 0.4, 0.05);
+        vec3 crimson = vec3(0.7, 0.08, 0.0);
+        vec3 abyss = vec3(0.15, 0.02, 0.0);
+
+        float t = clamp(dist * 0.7 + plasma * 0.25, 0.0, 1.0);
+        vec3 plasmaColor;
+        if (t < 0.15) {
+          plasmaColor = mix(whiteHot, yellow, t / 0.15);
+        } else if (t < 0.35) {
+          plasmaColor = mix(yellow, orange, (t - 0.15) / 0.2);
+        } else if (t < 0.65) {
+          plasmaColor = mix(orange, crimson, (t - 0.35) / 0.3);
+        } else {
+          plasmaColor = mix(crimson, abyss, (t - 0.65) / 0.35);
+        }
+
+        // === SOLAR FLARE TENDRILS ===
+        float flareAngle = atan(sp.y, sp.x);
+        float flare = snoise(vec3(flareAngle * 3.0, dist * 2.0, uTime * 0.5));
+        float flareMask = smoothstep(0.4, 0.8, dist) * smoothstep(1.2, 0.7, dist);
+        plasmaColor += orange * flare * flareMask * 0.6;
+
+        // === NUMERAL AS RADIATING EPICENTER ===
+        // Sample on front and back faces
+        float faceZ = abs(vNormal.z);
+        float onFace = step(0.9, faceZ);
+        vec4 labelSample = texture2D(uLabel, vUv);
+        float numeralMask = labelSample.a * onFace;
+
+        // The numeral blazes white-hot and radiates outward
+        float numeralGlow = numeralMask * (0.9 + 0.1 * sin(uTime * 4.0));
+        // Radial glow AROUND the numeral — spreads energy from the letter shape
+        float numeralSpread = numeralMask * smoothstep(0.0, 0.3, numeralMask) * 0.4;
+
+        // === EDGE CONTAINMENT — darker at the very edges like a vessel barely holding it ===
+        float edge = smoothstep(0.85, 1.0, max(max(abs(vPosition.x), abs(vPosition.y)), abs(vPosition.z)) / 0.5);
+        vec3 shellDark = vec3(0.08, 0.02, 0.0);
+
+        // === COMPOSE ===
+        vec3 color = plasmaColor;
+        // Numeral burns through as pure white radiance
+        color = mix(color, whiteHot, numeralGlow);
+        // Add radial energy from numeral
+        color += whiteHot * numeralSpread;
+        // Darken edges — barely contained
+        color = mix(color, shellDark, edge * 0.5);
+
+        // === EMISSION INTENSITY ===
+        // Core glows hot, edges smolder, numeral is the brightest point
+        float intensity = 1.5 + (1.0 - dist) * 0.8 + numeralGlow * 1.5 + pulse * 0.3;
+        color *= intensity;
+
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `,
+  });
+}
+
+// ── Composite Brushed Aluminum Material ──────────────────────────────
+const compositeScreenSize = { w: window.innerWidth, h: window.innerHeight };
+
+function createCompositeMaterial() {
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x7a7e82,       // dark gunmetal — reads as dim metal, not bright
+    metalness: 0.3,        // moderate metal for proper highlights
+    roughness: 0.7,        // brushed finish
+    map: brushedMetalTexture,
+    envMap: mirrorRenderTarget ? mirrorRenderTarget.texture : null,
+    envMapIntensity: 0.4,  // subtle environmental reflection
+  });
+
+  // "Bead" highlight logic — normal-based so it stays locked to each block's
+  // physical surface regardless of camera angle. Reduced highlight intensity
+  // to stop the blocks from washing out under the altar spotlight.
+  mat.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <output_fragment>',
+      `#include <output_fragment>
+       vec3 viewNormal = normalize(vNormal);
+       float highlight = smoothstep(0.55, 1.0, dot(viewNormal, normalize(vec3(-1.0, 1.0, 1.0))));
+       float shadow = smoothstep(0.5, 1.0, dot(viewNormal, normalize(vec3(1.0, -1.0, -1.0))));
+       gl_FragColor.rgb += vec3(0.06) * highlight;
+       gl_FragColor.rgb -= vec3(0.10) * shadow;`
+    );
+  };
+
+  return mat;
+}
+
+// ── Mirror '1' Material (CubeCamera) ─────────────────────────────────
+function getOrCreateMirrorMaterial() {
+  if (mirrorMaterial) return mirrorMaterial;
+
+  // Render target and cube camera are created in init(); just build the material
+  mirrorMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    metalness: 1.0,
+    roughness: 0.02,
+    envMap: mirrorRenderTarget.texture,
+    envMapIntensity: 5.0, // crank up so reflections read as pure mirror
+  });
+  return mirrorMaterial;
+}
+
+// ── Bootstrap ────────────────────────────────────────────────────────
+async function init() {
+  // 1. Rapier WASM initialisation (async/await for mobile WASM memory)
+  await RAPIER.init();
+  world = new RAPIER.World({ x: 0.0, y: -15.0, z: 0.0 });
+
+  // 2. Three.js scene
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0a0a);
+
+  // Volumetric 'Dust' — dusty cavern feel (dark gray lets light cones glow in air)
+  scene.fog = new THREE.FogExp2(0x0a0a0a, 0.012);
+
+  // Generate shared concrete textures
+  concreteTexture = createConcreteTexture();
+  concreteBumpTexture = createConcreteBumpTexture();
+  brushedMetalTexture = createBrushedMetalTexture();
+
+  // 3. Camera — low-angle, monumental perspective. Framed so the obelisk
+  // is the dominant visual element with altar + dex in the lower foreground.
+  camera = new THREE.PerspectiveCamera(
+    48,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    200
+  );
+  camera.position.set(0, 7, 28);
+  camera.lookAt(0, 5, -4);
+
+  // 4. Renderer with shadows
+  renderer = new THREE.WebGLRenderer({ antialias: false });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.25;
+  document.body.appendChild(renderer.domElement);
+
+  try {
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    // High threshold keeps bloom focused on only the hottest prime core values.
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.8, 0.5, 1.5);
+    composer.addPass(bloomPass);
+  } catch (err) {
+    console.warn("Post-processing unavailable, using direct renderer:", err);
+    composer = null;
+    bloomPass = null;
+  }
+
+  // 5. Shared CubeCamera / RenderTarget (used by mirror '1' and composite envMaps)
+  mirrorRenderTarget = new THREE.WebGLCubeRenderTarget(256, {
+    generateMipmaps: true,
+    minFilter: THREE.LinearMipmapLinearFilter,
+  });
+  mirrorCubeCamera = new THREE.CubeCamera(0.1, 100, mirrorRenderTarget);
+  scene.add(mirrorCubeCamera);
+
+  // 6. Lighting ──────────────────────────────────────────────────────────
+  // A. Ambient Fill — strong hemisphere so the whole room reads as lit
+  // material (not black void). Warm top, cool-neutral bottom. This is the
+  // MAIN contributor to the mirror cube reflecting something interesting
+  // on every face — CubeCamera renders the scene from the mirror position,
+  // and if nothing is lit, nothing reflects.
+  const ambient = new THREE.HemisphereLight(0xc8beab, 0x3e3a36, 1.15);
+  scene.add(ambient);
+
+  // A2. Front Fill — diffuse light coming from in front of the scene (from
+  // the camera's side), so the fronts of objects — including the mirror
+  // cube's front face — have something to reflect. Low intensity, wide,
+  // no shadows so it reads as general environmental illumination.
+  const frontFill = new THREE.DirectionalLight(0xfff2e0, 0.55);
+  frontFill.position.set(0, 8, 25);
+  frontFill.castShadow = false;
+  scene.add(frontFill);
+
+  // A3. Rear Fill — a soft light coming from BEHIND the obelisk so the
+  // back faces of the mirror cube and the obelisk's back aren't black.
+  const rearFill = new THREE.DirectionalLight(0xd8e0ea, 0.35);
+  rearFill.position.set(0, 6, -18);
+  rearFill.castShadow = false;
+  scene.add(rearFill);
+
+  // A4. Altar-area omnidirectional fill — a low-intensity point light floating
+  // above the altar so the mirror trinket ("1") reflects lit surroundings on
+  // every face. Without this, the CubeCamera sees a mostly-dark scene and
+  // renders the mirror as black.
+  const altarOmni = new THREE.PointLight(0xfff0dc, 55, 25, 1.8);
+  altarOmni.position.set(0, 5, ALTAR_Z);
+  altarOmni.castShadow = false;
+  scene.add(altarOmni);
+
+  // B. Diffuse Altar Light — warm wash over the altar and PrimeDex
+  const altarSpot = new THREE.SpotLight(0xfff5e6, 140);
+  altarSpot.position.set(0, 9, ALTAR_Z + 3);
+  altarSpot.target.position.set(0, 0, ALTAR_Z + 1);
+  altarSpot.angle = Math.PI / 2.5;
+  altarSpot.penumbra = 0.65;
+  altarSpot.decay = 1.5;
+  altarSpot.castShadow = true;
+  scene.add(altarSpot);
+  scene.add(altarSpot.target);
+
+  // C. 3-Point Obelisk Lighting
+  const obeliskTarget = new THREE.Object3D();
+  obeliskTarget.position.set(0, 4, STAGE_Z);
+  scene.add(obeliskTarget);
+
+  // Top-front — reduced decay so light reaches the floor
+  const spotFrontTop = new THREE.SpotLight(0xffffff, 200);
+  spotFrontTop.position.set(0, 16, STAGE_Z + 8);
+  spotFrontTop.target = obeliskTarget;
+  spotFrontTop.angle = 0.55;
+  spotFrontTop.penumbra = 0.5;
+  spotFrontTop.decay = 1.5;
+  spotFrontTop.castShadow = true;
+  scene.add(spotFrontTop);
+
+  // Left
+  const spotLeft = new THREE.SpotLight(0xffffff, 120);
+  spotLeft.position.set(-8, 13, STAGE_Z + 5);
+  spotLeft.target = obeliskTarget;
+  spotLeft.angle = 0.5;
+  spotLeft.penumbra = 0.5;
+  spotLeft.decay = 1.5;
+  spotLeft.castShadow = true;
+  scene.add(spotLeft);
+
+  // Right
+  const spotRight = new THREE.SpotLight(0xffffff, 120);
+  spotRight.position.set(8, 13, STAGE_Z + 5);
+  spotRight.target = obeliskTarget;
+  spotRight.angle = 0.5;
+  spotRight.penumbra = 0.5;
+  spotRight.decay = 1.5;
+  spotRight.castShadow = true;
+  scene.add(spotRight);
+
+  // E. Floor wash — a wide, dim spotlight aimed straight down at the mid-ground
+  // This creates the visible floor plane and light pools from the inspo image
+  const floorWash = new THREE.SpotLight(0xe8ddd0, 60);
+  floorWash.position.set(0, 10, ALTAR_Z);
+  floorWash.target.position.set(0, 0, ALTAR_Z);
+  floorWash.angle = Math.PI / 2;
+  floorWash.penumbra = 1.0;
+  floorWash.decay = 1.2;
+  floorWash.castShadow = false;
+  scene.add(floorWash);
+  scene.add(floorWash.target);
+
+  // D. Back Wall Downlights — warm pools washing the upper back wall.
+  // Aimed HIGH on the wall (upper third) to lift the room's apparent ceiling
+  // and pick out the exit-sigil numeral without blowing out the lower scene.
+  const downlightDefs = [ { x: -5 }, { x: 0 }, { x: 5 } ];
+  for (const dl of downlightDefs) {
+    const spot = new THREE.SpotLight(0xf5e6d0, 220);
+    spot.position.set(dl.x, 17, -8);      // very high, forward of back wall
+    spot.target.position.set(dl.x, 13, -13); // aim at upper third of back wall
+    spot.angle = 0.5;
+    spot.penumbra = 0.55;
+    spot.decay = 1.4;
+    spot.castShadow = false;
+    scene.add(spot);
+    scene.add(spot.target);
+  }
+
+  // 6. Room, Altar & Cold Open
+  createRoom();
+  createAltar();
+
+  // 6b. Dust system removed — clear air for the vault
+
+  // 7. Events (pointerdown for mobile touch support)
+  window.addEventListener("pointerdown", onPointerDown);
+  window.addEventListener("resize", onResize);
+
+  // 8. Start loop
+  loop();
+
+  // 9. Start the #12 Cold Open sequence after a brief delay
+  gsap.delayedCall(0.5, startColdOpen);
+}
+
+// ── Room (Brutalist Concrete) ────────────────────────────────────────
+function createRoom() {
+  const wallMat = new THREE.MeshStandardMaterial({
+    color: 0x555555,
+    roughness: 0.88,
+    metalness: 0.0,
+    map: concreteTexture,
+    bumpMap: concreteBumpTexture,
+    bumpScale: 0.8,
+  });
+
+  // Matte poured-concrete floor
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: 0x444444,
+    roughness: 0.9,
+    metalness: 0.02,
+    map: concreteTexture,
+    bumpMap: concreteBumpTexture,
+    bumpScale: 0.4,
+  });
+
+  const roomW = 800; // width (x) — vast horizon for 144-obelisk chain
+  const roomH = 18; // height (y) — a bit shorter, more intimate
+  // Back wall sits ~7 units behind the obelisk stage, but the floor extends
+  // forward all the way to the camera so the altar has ground beneath it.
+  const roomD = 40;
+  const thick = 1;
+  const roomZCenter = 7; // back wall at z = -13, floor extends to z = 27
+
+  // Helper: create a static box with mesh + Rapier collider
+  function addStaticBox(w, h, d, px, py, pz, mat) {
+    const geo = new THREE.BoxGeometry(w, h, d);
+    const mesh = new THREE.Mesh(geo, mat || wallMat);
+    mesh.receiveShadow = true;
+    mesh.castShadow = false;
+    mesh.position.set(px, py, pz);
+    scene.add(mesh);
+
+    const bodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(px, py, pz);
+    const rb = world.createRigidBody(bodyDesc);
+    const cd = RAPIER.ColliderDesc.cuboid(w / 2, h / 2, d / 2)
+      .setRestitution(0.0)
+      .setFriction(0.8);
+    world.createCollider(cd, rb);
+  }
+
+  // Floor (glossy sealed concrete for specular pooling)
+  addStaticBox(roomW, thick, roomD, 0, -thick / 2, roomZCenter, floorMat);
+
+  // Ceiling
+  addStaticBox(roomW, thick, roomD, 0, roomH + thick / 2, roomZCenter);
+
+  // Back Wall
+  addStaticBox(roomW, roomH, thick, 0, roomH / 2, roomZCenter - roomD / 2 + thick / 2);
+
+  // Exit sigil carved into the back wall — large numeral for this room.
+  // Stays dormant (matte stone) until all factor hinges are activated; then
+  // it breathes neon green and becomes tap-to-exit.
+  createExitSigil(roomZCenter - roomD / 2 + thick + 0.01);
+
+  // Side walls removed — infinite vault horizon
+
+  // Stage — wider cylinder at z: -10 so obelisk shadow lands on it
+  const stageRadius = 6;
+  const stageHeight = 0.25;
+  const stageGeo = new THREE.CylinderGeometry(stageRadius, stageRadius, stageHeight, 64);
+  const stageMesh = new THREE.Mesh(stageGeo, wallMat);
+  stageMesh.receiveShadow = true;
+  stageMesh.castShadow = true;
+  stageMesh.position.set(0, stageHeight / 2, STAGE_Z);
+  scene.add(stageMesh);
+
+  // Rapier collider for the stage cylinder
+  const stageBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, stageHeight / 2, STAGE_Z);
+  const stageRb = world.createRigidBody(stageBodyDesc);
+  const stageCd = RAPIER.ColliderDesc.cylinder(stageHeight / 2, stageRadius)
+    .setRestitution(0.0)
+    .setFriction(0.8);
+  world.createCollider(stageCd, stageRb);
+
+  // Wall wash lights replaced by back-wall downlights in init()
+}
+
+// ── Exit Sigil (back-wall numeral) ──────────────────────────────────
+// Massive carved numeral on the back wall of the vault. Rendered by baking
+// the digits into a canvas texture and applying it to a plane that sits flush
+// against the wall. Two layers stacked: a stone-embossed base (always visible)
+// and an additive neon-green layer (breathes when active). Activated once all
+// factor hinges in the room have been surfaced.
+function createExitSigil(wallFrontZ) {
+  const sigilW = 10;
+  const sigilH = 7;
+  const sigilY = 12; // high up so it reads as monumental, framed in the vault
+
+  // Shared canvas factory so both the stone and glow layers render the same
+  // glyph at the same position.
+  function makeSigilCanvas(color, alpha) {
+    const c = document.createElement("canvas");
+    c.width = 1024; c.height = 1024 * (sigilH / sigilW);
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},${alpha})`;
+    ctx.font = `bold ${c.height * 0.86}px 'Lexend', sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(NUM_CUBES), c.width / 2, c.height / 2);
+    return c;
+  }
+
+  // Base stone glyph — dark, subtle, feels carved into the wall
+  const stoneTex = new THREE.CanvasTexture(makeSigilCanvas({ r: 20, g: 18, b: 16 }, 0.85));
+  const stoneGeo = new THREE.PlaneGeometry(sigilW, sigilH);
+  const stoneMat = new THREE.MeshStandardMaterial({
+    map: stoneTex,
+    transparent: true,
+    roughness: 0.9,
+    metalness: 0.02,
+  });
+  exitSigilMesh = new THREE.Mesh(stoneGeo, stoneMat);
+  exitSigilMesh.position.set(0, sigilY, wallFrontZ);
+  scene.add(exitSigilMesh);
+
+  // Neon glow layer — drawn ON TOP of the stone, additive blending so it
+  // intensifies rather than replaces. Breathing controls its opacity.
+  const glowTex = new THREE.CanvasTexture(makeSigilCanvas({ r: 0, g: 255, b: 136 }, 1.0));
+  const glowGeo = new THREE.PlaneGeometry(sigilW * 1.08, sigilH * 1.08);
+  exitSigilGlowMat = new THREE.MeshBasicMaterial({
+    map: glowTex,
+    transparent: true,
+    opacity: 0.0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const glowMesh = new THREE.Mesh(glowGeo, exitSigilGlowMat);
+  glowMesh.position.set(0, sigilY, wallFrontZ + 0.01);
+  scene.add(glowMesh);
+
+  // Tap target — a large invisible plane covering the whole sigil area.
+  const hitGeo = new THREE.PlaneGeometry(sigilW * 1.2, sigilH * 1.2);
+  const hitMat = new THREE.MeshBasicMaterial({
+    transparent: true,
+    opacity: 0.0,
+    depthWrite: false,
+  });
+  exitSigilHitMesh = new THREE.Mesh(hitGeo, hitMat);
+  exitSigilHitMesh.position.set(0, sigilY, wallFrontZ + 0.02);
+  scene.add(exitSigilHitMesh);
+}
+
+// Check whether all factor hinges are surfaced, and if so wake the sigil.
+function checkRoomFullyFactored() {
+  if (exitSigilActive) return;
+  // For N=12 the factor hinges are 2, 3, 4, 6. Check against surfacedFactors.
+  const requiredFactors = [2, 3, 4, 6];
+  const allSurfaced = requiredFactors.every((f) => surfacedFactors.has(f));
+  if (allSurfaced) {
+    exitSigilActive = true;
+  }
+}
+
+// ── Calendar / Tracker Screen ────────────────────────────────────────
+// Fades in the DOM overlay defined in the HTML. The grid shows tiles 1..144
+// (for now 1..24 lightly, with 1..12 as accessible), with the current room's
+// number marked "done" and seeded with the trinkets surfaced this session.
+function transitionToCalendarScreen() {
+  const grid = document.getElementById("cal-grid");
+  const screen = document.getElementById("calendar-screen");
+  if (!grid || !screen) return;
+
+  // Populate the grid. For this pass we show 1..24 — the first two rows of
+  // the eventual 144-tile calendar. Only NUM_CUBES (12) is marked done.
+  grid.innerHTML = "";
+  const VISIBLE_TILES = 24;
+  for (let n = 1; n <= VISIBLE_TILES; n++) {
+    const cell = document.createElement("div");
+    cell.className = "cal-cell";
+    if (n === NUM_CUBES) cell.classList.add("done");
+    else if (n > NUM_CUBES) cell.classList.add("locked"); // beyond this room
+    // n < NUM_CUBES cells are available-but-not-done; just styled as default
+
+    const num = document.createElement("div");
+    num.className = "cal-num";
+    num.textContent = String(n);
+    cell.appendChild(num);
+
+    // For the completed room (N=12), show the trinket row
+    if (n === NUM_CUBES) {
+      const trinketRow = document.createElement("div");
+      trinketRow.className = "cal-trinkets";
+      // Sort altar trinkets by label for consistent display
+      const sorted = [...altarTrinkets].sort((a, b) => a.label - b.label);
+      for (const t of sorted) {
+        const tEl = document.createElement("div");
+        tEl.className = "cal-trinket " + t.materialType;
+        tEl.textContent = String(t.label);
+        trinketRow.appendChild(tEl);
+      }
+      cell.appendChild(trinketRow);
+    }
+
+    grid.appendChild(cell);
+  }
+
+  // Fade in.
+  screen.classList.add("visible");
+}
+
+// ── Altar Table (slab on pedestal) ──────────────────────────────────
+function createAltar() {
+
+  const altarMat = new THREE.MeshStandardMaterial({
+    color: 0x1a1a1c,
+    roughness: 0.95,
+    metalness: 0.02,
+    bumpMap: concreteBumpTexture,
+    bumpScale: 0.02,
+  });
+
+  const pz = ALTAR_Z;
+
+  // Pedestal — shorter, stocky
+  const pedWTop = 1.2;
+  const pedWBot = 1.6;
+  const pedH = 0.8;
+  const pedD = 1.2;
+  const pedY = pedH / 2;
+
+  const pedShape = new THREE.Shape();
+  pedShape.moveTo(-pedWBot / 2, 0);
+  pedShape.lineTo(pedWBot / 2, 0);
+  pedShape.lineTo(pedWTop / 2, pedH);
+  pedShape.lineTo(-pedWTop / 2, pedH);
+  pedShape.closePath();
+  const pedGeo = new THREE.ExtrudeGeometry(pedShape, { depth: pedD, bevelEnabled: false });
+  pedGeo.translate(0, 0, -pedD / 2);
+  const pedMesh = new THREE.Mesh(pedGeo, altarMat);
+  pedMesh.receiveShadow = true;
+  pedMesh.castShadow = true;
+  pedMesh.position.set(0, pedY, pz);
+  scene.add(pedMesh);
+
+  const pedBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, pedY, pz);
+  const pedRb = world.createRigidBody(pedBodyDesc);
+  const pedCd = RAPIER.ColliderDesc.cuboid(pedWBot / 2, pedH / 2, pedD / 2)
+    .setRestitution(0.0)
+    .setFriction(0.8);
+  world.createCollider(pedCd, pedRb);
+
+  // Slab — wide stone slab, sized to accommodate the cubby strip plus end margin.
+  const slabW = 15.5;
+  const slabH = 1.2;
+  const slabD = 1.4;
+  const slabY = pedH + slabH / 2;
+
+  const slabGeo = new THREE.BoxGeometry(slabW, slabH, slabD);
+  const slabMesh = new THREE.Mesh(slabGeo, altarMat);
+  slabMesh.receiveShadow = true;
+  slabMesh.castShadow = true;
+  slabMesh.position.set(0, slabY, pz);
+  scene.add(slabMesh);
+
+  const slabBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, slabY, pz);
+  const slabRb = world.createRigidBody(slabBodyDesc);
+  const slabCd = RAPIER.ColliderDesc.cuboid(slabW / 2, slabH / 2, slabD / 2)
+    .setRestitution(0.0)
+    .setFriction(0.8);
+  world.createCollider(slabCd, slabRb);
+
+  createPrimeDex();
+}
+
+// All primes up to 144 — these are the cubbies the dex will ever hold.
+// Computed once at module init so the dex can size itself correctly.
+const DEX_PRIMES = (() => {
+  const out = [];
+  for (let n = 2; n <= 144; n++) if (isPrime(n)) out.push(n);
+  return out;
+})();
+
+// ── PrimeDex (cubby strip attached to the altar's front face) ───────
+// Pedagogically a shelf full of cubbies — each one holds one PRIME trinket.
+// There is one cubby per prime ≤ 144 (34 cubbies), so as the student
+// progresses through rooms, the dex accumulates trinkets. In this room
+// (N=12) only the primes ≤ 12 (2, 3, 5, 7, 11) could ever be discovered,
+// but all cubbies exist — the rest are visible as empty waiting slots.
+//
+// The strip is wider than the altar, so the student drags horizontally to
+// scroll the dex. A fixed "viewport" (altar-width band) is what's actually
+// visible; cubbies outside it slide in from the sides as the user scrolls.
+function createPrimeDex() {
+  const cubbyInnerW = 1.0;                    // inner width each cubby can hold
+  const spacing = PRIMEDEX_SLOT_SPACING;       // 1.15 — leaves 0.15 of wall between cubbies
+  const numCubbies = DEX_PRIMES.length;        // one per prime ≤ 144
+  const stripW = spacing * numCubbies + 0.2;   // total strip width (scrolls)
+  const cubbyDepth = 0.9;                      // how far cubbies stick out from altar
+  const floorThick = 0.2;                      // thick enough to catch fast drops
+  const dividerThick = 0.08;
+
+  // Altar slab geometry constants (must stay in sync with createAltar).
+  const altarFrontZ = ALTAR_Z + 1.4 / 2;       // slab front face (slabD/2 = 0.7)
+  const altarSlabTopY = ALTAR_TOP_Y;           // 2.0 — top of the altar slab
+  const altarSlabBottomY = ALTAR_PED_H;        // 0.8 — bottom of the altar slab
+  // Cubby strip is attached to the front face of the altar slab, occupying
+  // the lower ~80% of the slab's height (a band of recessed compartments).
+  // Cubbies stick OUT forward from the slab so the trinket faces are
+  // clearly visible to the camera.
+  const stripTopY = altarSlabTopY - 0.05;                 // just under slab top
+  const stripBottomY = altarSlabBottomY - 0.15;           // extend below slab bottom
+  const stripH = stripTopY - stripBottomY;
+  const stripCenterY = (stripTopY + stripBottomY) / 2;
+  const stripCenterZ = altarFrontZ + cubbyDepth / 2 - 0.05; // slight overlap into slab
+
+  primeDexGroup = new THREE.Group();
+  // Initial scroll offset: place the first cubby (prime=2) near the left edge
+  // of the altar's visible band, so the low primes are on-screen at start.
+  const altarSlabHalfW = 15.5 / 2;
+  const SHALF = ((numCubbies - 1) / 2) * spacing; // half-width of strip's cubby range
+  const initialScrollX = -altarSlabHalfW + spacing / 2 + SHALF;
+  primeDexGroup.position.set(initialScrollX, stripCenterY, stripCenterZ);
+  scene.add(primeDexGroup);
+  // Scroll bounds: first cubby at right edge ↔ last cubby at left edge.
+  primeDexScrollMin = -altarSlabHalfW - SHALF;
+  primeDexScrollMax =  altarSlabHalfW + SHALF;
+
+  // Stone material — matches the altar, so the cubby strip reads as part of it.
+  const stoneMat = new THREE.MeshStandardMaterial({
+    color: 0x1a1a1c,
+    roughness: 0.92,
+    metalness: 0.02,
+    bumpMap: concreteBumpTexture,
+    bumpScale: 0.04,
+  });
+
+  // Darker inside so trinket numerals read against contrast.
+  const cubbyBackMat = new THREE.MeshStandardMaterial({
+    color: 0x101010,
+    roughness: 1.0,
+    metalness: 0.0,
+  });
+
+  // ── Bottom plank (shelf floor — trinkets sit on this) ──
+  const botGeo = new THREE.BoxGeometry(stripW, floorThick, cubbyDepth);
+  const botMesh = new THREE.Mesh(botGeo, stoneMat);
+  botMesh.position.set(0, -stripH / 2 + floorThick / 2, 0);
+  botMesh.castShadow = true;
+  botMesh.receiveShadow = true;
+  primeDexGroup.add(botMesh);
+
+  // ── Back wall (the stone plane behind all cubbies — closes off the back) ──
+  const backGeo = new THREE.BoxGeometry(stripW, stripH, 0.08);
+  const backMesh = new THREE.Mesh(backGeo, stoneMat);
+  backMesh.position.set(0, 0, -cubbyDepth / 2 + 0.04);
+  backMesh.castShadow = true;
+  backMesh.receiveShadow = true;
+  primeDexGroup.add(backMesh);
+
+  // Physics — kinematic body so colliders track the group's scroll position.
+  // Initial translation matches the group's scroll offset; updated whenever
+  // the user drags the dex.
+  const dexBodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased()
+    .setTranslation(initialScrollX, stripCenterY, stripCenterZ);
+  primeDexBody = world.createRigidBody(dexBodyDesc);
+  primeDexWells = [];
+
+  // Colliders for bottom floor and back wall.
+  world.createCollider(
+    RAPIER.ColliderDesc.cuboid(stripW / 2, floorThick / 2, cubbyDepth / 2)
+      .setTranslation(0, -stripH / 2 + floorThick / 2, 0),
+    primeDexBody
+  );
+  world.createCollider(
+    RAPIER.ColliderDesc.cuboid(stripW / 2, stripH / 2, 0.04)
+      .setTranslation(0, 0, -cubbyDepth / 2 + 0.04),
+    primeDexBody
+  );
+
+  // ── Dividers between cubbies (and the two end caps) ──
+  // numCubbies cubbies → numCubbies+1 dividers. Evenly spaced.
+  for (let i = 0; i <= numCubbies; i++) {
+    const dividerX = (i - numCubbies / 2) * spacing;
+    const divGeo = new THREE.BoxGeometry(dividerThick, stripH, cubbyDepth - 0.04);
+    const divMesh = new THREE.Mesh(divGeo, stoneMat);
+    divMesh.position.set(dividerX, 0, 0.02);
+    divMesh.castShadow = true;
+    divMesh.receiveShadow = true;
+    primeDexGroup.add(divMesh);
+
+    world.createCollider(
+      RAPIER.ColliderDesc.cuboid(dividerThick / 2, stripH / 2, (cubbyDepth - 0.04) / 2)
+        .setTranslation(dividerX, 0, 0.02),
+      primeDexBody
+    );
+  }
+
+  // ── Per-cubby landing targets (no numerals — the trinkets carry their own) ──
+  // Each cubby corresponds to one prime number in DEX_PRIMES.
+  for (let i = 0; i < numCubbies; i++) {
+    const prime = DEX_PRIMES[i];
+    const localX = (i - (numCubbies - 1) / 2) * spacing;
+
+    primeDexWells.push({
+      prime,
+      localX,
+      // worldX depends on the current scroll offset of primeDexGroup.position.x,
+      // so we store localX and compute worldX fresh at drop time (see getCubbyTarget).
+      worldY: stripCenterY - stripH / 2 + floorThick + CUBE_SIZE / 2 + 0.02,
+      worldZ: stripCenterZ,
+    });
+  }
+}
+
+// Return world-space drop target for a given prime's home cubby.
+// Reads the dex group's current scroll offset so the target tracks scrolling.
+function getCubbyTarget(primeNum) {
+  const cubby = primeDexWells.find((w) => w.prime === primeNum);
+  if (!cubby) return { x: 0, y: 2, z: 12 }; // safe fallback
+  return {
+    x: primeDexGroup.position.x + cubby.localX,
+    y: cubby.worldY,
+    z: cubby.worldZ,
+  };
+}
+
+// ── Prime Discovery: arc the cube to its home cubby, then gravity-drop ──
+// Called when a fold reveals a prime divisor. The cube is born at the
+// fallen-segment's world position in the full supernova material, arcs
+// through the air to a hover point above its home cubby, then gets handed
+// to Rapier gravity to drop into the cubby.
+function triggerPrimeDiscovery(divisor, sourceSeg) {
+  if (!sourceSeg || !sourceSeg.mesh) return;
+
+  sourceSeg.mesh.updateWorldMatrix(true, false);
+  const sourceWorld = new THREE.Vector3();
+  sourceSeg.mesh.getWorldPosition(sourceWorld);
+
+  // Build the discovery cube — full prime supernova material, unit size.
+  const geo = new THREE.BoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
+  const mat = createPrimeMaterial(divisor);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.position.copy(sourceWorld);
+  scene.add(mesh);
+  primeShaderMeshes.push(mesh);
+
+  // Stronger point light so the surroundings pick up the prime glow — this
+  // is the "supernova light" that should pool onto the altar and stage as
+  // the cube flies through the air and sits in its cubby.
+  const pl = new THREE.PointLight(0xff8033, 8.0, 14, 1.5);
+  mesh.add(pl);
+
+  const target = getCubbyTarget(divisor);
+  // Hover LOW — just 1.4 units above the cubby rim — so the drop is short
+  // and the cube hits the cubby floor with low velocity (can't bounce out).
+  const hoverY = target.y + 1.4;
+
+  gsap.to(mesh.position, {
+    x: target.x,
+    y: hoverY,
+    z: target.z,
+    duration: 1.1,
+    ease: "power2.inOut",
+    onComplete: () => {
+      // Hand off to Rapier gravity. LOCK rotations so the cube can't tumble
+      // — it should fall perfectly square into the cubby, with zero restitution.
+      // CCD (continuous collision detection) is critical because the cubby
+      // floor is thin and the cube can otherwise tunnel straight through it
+      // between physics steps.
+      const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(mesh.position.x, mesh.position.y, mesh.position.z)
+        .setLinearDamping(0.8)
+        .setAngularDamping(10.0)
+        .lockRotations()
+        .setCcdEnabled(true);
+      const rb = world.createRigidBody(bodyDesc);
+
+      const half = CUBE_SIZE / 2;
+      const colliderDesc = RAPIER.ColliderDesc.cuboid(half, half, half)
+        .setRestitution(0.0)
+        .setFriction(1.0)
+        .setDensity(1.5);
+      world.createCollider(colliderDesc, rb);
+
+      bodies.push({ mesh, rigidBody: rb });
+    },
+  });
+}
+
+// ── Primary Obelisk — replaced by Cold Open sequence ─────────────────
+
+// ── Create Trinket on Altar ──────────────────────────────────────────
+function createTrinket(label, materialType) {
+  // Single-instance guard — if a trinket for this number is already on the altar,
+  // do nothing (hitting the same hinge twice shouldn't duplicate).
+  if (altarTrinkets.some((t) => t.label === label)) {
+    return altarTrinkets.find((t) => t.label === label).mesh;
+  }
+
+  const trinketSize = CUBE_SIZE; // 1x1x1
+  const geo = new THREE.BoxGeometry(trinketSize, trinketSize, trinketSize);
+  let mat;
+
+  if (materialType === "mirror") {
+    mat = getOrCreateMirrorMaterial().clone();
+    mirrorMesh = null; // will be set after mesh creation
+  } else if (materialType === "prime") {
+    mat = createPrimeMaterial(label);
+  } else {
+    mat = createCompositeMaterial();
+  }
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+
+  // Set mirror reference for CubeCamera updates
+  if (materialType === "mirror" && !mirrorMesh) {
+    mirrorMesh = mesh;
+  }
+
+  if (materialType === "prime") {
+    primeShaderMeshes.push(mesh);
+    const pl = new THREE.PointLight(0xff6600, 2, 3, 2);
+    mesh.add(pl);
+  }
+
+  // Etched numeral on the front face (for non-prime materials)
+  if (materialType !== "prime") {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext("2d");
+    if (materialType === "mirror") {
+      ctx.fillStyle = "#bbbbbb";
+    } else {
+      ctx.fillStyle = "#c8ccd0";
+    }
+    ctx.fillRect(0, 0, 256, 256);
+    ctx.fillStyle = materialType === "mirror" ? "rgba(0,0,0,0.3)" : "rgba(0,0,0,0.25)";
+    ctx.font = "bold 160px 'Lexend', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(label), 128, 128);
+    const labelTex = new THREE.CanvasTexture(canvas);
+    const frontMat = mat.clone();
+    frontMat.map = labelTex;
+    frontMat.needsUpdate = true;
+    mesh.material = [mat, mat, mat, mat, frontMat, mat];
+  }
+
+  // Insert in correct numerical order
+  altarTrinkets.push({ mesh, label, materialType });
+  altarTrinkets.sort((a, b) => a.label - b.label);
+
+  // Reposition all trinkets centered on the altar
+  const trinketSpacing = 1.15; // matches dex cubby spacing
+  const totalWidth = (altarTrinkets.length - 1) * trinketSpacing;
+  const startX = -totalWidth / 2;
+  for (let i = 0; i < altarTrinkets.length; i++) {
+    const targetX = startX + i * trinketSpacing;
+    if (altarTrinkets[i].mesh === mesh) {
+      // Sit trinket on the altar slab's top surface (not sunk into the stone).
+      mesh.position.set(targetX, ALTAR_TOP_Y + trinketSize / 2 + 0.01, ALTAR_Z);
+    } else {
+      gsap.to(altarTrinkets[i].mesh.position, {
+        x: targetX,
+        duration: 0.4,
+        ease: "power2.inOut",
+      });
+    }
+  }
+
+  // Entry animation
+  mesh.scale.set(0, 0, 0);
+  gsap.to(mesh.scale, { x: 1, y: 1, z: 1, duration: 0.5, ease: "back.out(2)" });
+
+  return mesh;
+}
+
+// ── Heavy Thud Audio ─────────────────────────────────────────────────
+function playThud() {
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = 55; // deep bass
+  gain.gain.setValueAtTime(0.4, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.3);
+}
+
+function playMechanicalSlide() {
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+
+  const osc = ctx.createOscillator();
+  const filter = ctx.createBiquadFilter();
+  const gain = ctx.createGain();
+
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(180, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(95, ctx.currentTime + 0.34);
+
+  filter.type = "bandpass";
+  filter.frequency.setValueAtTime(720, ctx.currentTime);
+  filter.Q.value = 0.9;
+
+  gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.04, ctx.currentTime + 0.04);
+  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.36);
+
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.38);
+}
+
+function ensureAudioContext() {
+  if (!audioCtx) {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+    audioCtx = new Ctor();
+  }
+  return audioCtx;
+}
+
+// ── Camera Shake ─────────────────────────────────────────────────────
+function cameraShake(intensity = 0.15, duration = 0.2) {
+  const origPos = camera.position.clone();
+  const tl = gsap.timeline();
+  const steps = 6;
+  for (let i = 0; i < steps; i++) {
+    const factor = 1 - i / steps;
+    tl.to(camera.position, {
+      x: origPos.x + (Math.random() - 0.5) * intensity * factor,
+      y: origPos.y + (Math.random() - 0.5) * intensity * factor,
+      duration: duration / steps,
+      ease: "none",
+    });
+  }
+  tl.to(camera.position, { x: origPos.x, y: origPos.y, duration: 0.05 });
+}
+
+// ── Fusion Flash ─────────────────────────────────────────────────────
+function createFlash(position) {
+  const flashGeo = new THREE.SphereGeometry(2, 16, 16);
+  const flashMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 1.0,
+  });
+  const flash = new THREE.Mesh(flashGeo, flashMat);
+  flash.position.copy(position);
+  scene.add(flash);
+
+  gsap.to(flash.scale, { x: 4, y: 4, z: 4, duration: 0.4, ease: "power2.out" });
+  gsap.to(flashMat, {
+    opacity: 0,
+    duration: 0.6,
+    ease: "power2.out",
+    onComplete: () => {
+      scene.remove(flash);
+      flashGeo.dispose();
+      flashMat.dispose();
+    },
+  });
+}
+
+// ── #12 Cold Open Sequence ───────────────────────────────────────────
+function startColdOpen() {
+  // Spawn '1' trinket on altar at start
+  createTrinket(1, "mirror");
+
+  const dropCubes = [];
+  const baseY = STAGE_Y;
+
+  const tl = gsap.timeline({
+    onComplete: () => {
+      fuseCubes(dropCubes, baseY);
+    },
+  });
+
+  for (let i = 0; i < NUM_CUBES; i++) {
+    const geo = new THREE.BoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
+    const mat = getOrCreateMirrorMaterial().clone();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    const targetY = baseY + CUBE_SIZE / 2 + i * CUBE_SIZE;
+    const startY = 18; // ceiling area
+
+    mesh.position.set(0, startY, STAGE_Z);
+    scene.add(mesh);
+    dropCubes.push(mesh);
+
+    // Stagger each cube drop
+    tl.to(
+      mesh.position,
+      {
+        y: targetY,
+        duration: 0.35,
+        ease: "bounce.out",
+        onComplete: () => {
+          playThud();
+          cameraShake(0.05, 0.1);
+        },
+      },
+      i * 0.15
+    );
+  }
+}
+
+// ── Fusion: 12 cubes → 1 Composite Obelisk ──────────────────────────
+function fuseCubes(cubes, baseY) {
+  const centerY = baseY + (NUM_CUBES * CUBE_SIZE) / 2;
+  createFlash(new THREE.Vector3(0, centerY, STAGE_Z));
+  playThud();
+  cameraShake(0.3, 0.3);
+
+  // Remove individual cubes
+  gsap.delayedCall(0.2, () => {
+    for (const cube of cubes) {
+      scene.remove(cube);
+      cube.geometry.dispose();
+      if (cube.material !== mirrorMaterial) cube.material.dispose();
+    }
+
+    // Create composite obelisk
+    createCompositeObelisk(baseY);
+
+    // Spawn '12' composite trinket on altar
+    createTrinket(12, "composite");
+
+    coldOpenComplete = true;
+    lastInteractionTime = performance.now() / 1000;
+  });
+}
+
+// ── Composite Obelisk (single tall segment with "12" engraved) ──────
+function createCompositeObelisk(baseY) {
+  obeliskSegments = [];
+  hingePoints = [];
+  foldingComplete = false;
+  obeliskState.pieces = 1;
+  obeliskState.divisor = 0;
+  obeliskState.hinges = [];
+
+  // Parent group for the whole obelisk
+  obeliskGroup = new THREE.Group();
+  obeliskGroup.position.set(0, baseY, STAGE_Z);
+  scene.add(obeliskGroup);
+
+  // Single 12-unit-tall segment with the numeral "12" engraved on its front.
+  const segH = NUM_CUBES * CUBE_SIZE;
+  const mesh = createSegmentMesh(segH, NUM_CUBES);
+  mesh.position.set(0, segH / 2, 0);
+  obeliskGroup.add(mesh);
+  obeliskSegments.push({ mesh, level: 0 });
+
+  createHingePoints(baseY);
+}
+
+// ── Hinge Points (beads on left side) ────────────────────────────────
+function createHingePoints(baseY) {
+  // ÷2 at height 10, ÷3 at 9, ÷4 at 8, ÷6 at 6 (counting from bottom)
+  const hingeDefs = [
+    { height: 10, divisor: 2 },
+    { height: 9, divisor: 3 },
+    { height: 8, divisor: 4 },
+    { height: 6, divisor: 6 },
+  ];
+  hingePoints = [];
+
+  for (const def of hingeDefs) {
+    const hingeY = baseY + def.height * CUBE_SIZE;
+
+    // Signature Math Things. bead — a brushed-aluminum sphere. The brand
+    // bead is a neutral metallic orb (intentionally neither warm nor cool),
+    // rendered with a radial top-left highlight and a 135° metallic gradient.
+    // It IS the hinge, visually and pedagogically. The breathing neon glow
+    // lives on a separate additive-blend sphere so we can modulate it without
+    // touching the bead's metallic shading.
+    const beadRadius = 0.22;
+    const beadGeo = new THREE.SphereGeometry(beadRadius, 24, 18);
+    const beadMat = new THREE.MeshStandardMaterial({
+      color: 0xdcdcdc,         // neutral aluminum
+      metalness: 0.92,
+      roughness: 0.28,
+      map: brushedMetalTexture,
+      envMap: mirrorRenderTarget ? mirrorRenderTarget.texture : null,
+      envMapIntensity: 1.4,
+    });
+    const bead = new THREE.Mesh(beadGeo, beadMat);
+    bead.position.set(-CUBE_SIZE / 2 - beadRadius + 0.02, hingeY, STAGE_Z);
+    bead.castShadow = true;
+    scene.add(bead);
+
+    // Neon glow layer — slightly larger sphere in additive blend. Its opacity
+    // breathes from ~0 up to a grimy neon green and back down when idle.
+    const glowGeo = new THREE.SphereGeometry(beadRadius * 1.35, 24, 18);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0x00ff88,
+      transparent: true,
+      opacity: 0.0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    glow.position.copy(bead.position);
+    scene.add(glow);
+
+    // Invisible hit sphere — forgiving tap target, 5× visible bead radius.
+    const hitGeo = new THREE.SphereGeometry(0.6, 8, 8);
+    const hitMat = new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0.0,
+      depthWrite: false,
+    });
+    const hitMesh = new THREE.Mesh(hitGeo, hitMat);
+    hitMesh.position.copy(bead.position);
+    hitMesh.renderOrder = 999;
+    scene.add(hitMesh);
+
+    // The "÷N" sprite label is kept hidden by default (it was an overlay for
+    // debugging; real teaching text comes from the segment numerals themselves).
+    const canvas = document.createElement("canvas");
+    canvas.width = 64; canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#00ff88";
+    ctx.font = "bold 28px monospace";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("÷" + def.divisor, 32, 32);
+    const tex = new THREE.CanvasTexture(canvas);
+    const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.0 });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.scale.set(0.6, 0.6, 0.6);
+    sprite.position.set(-CUBE_SIZE / 2 - 0.8, hingeY, STAGE_Z);
+    scene.add(sprite);
+
+    hingePoints.push({
+      height: def.height,
+      divisor: def.divisor,
+      hingeY,
+      ring: bead,         // kept the .ring name for back-compat with other refs
+      glow,               // neon breathing layer
+      glowMat,
+      hitMesh,            // large invisible tap target
+      label: sprite,
+      labelMat: spriteMat,
+      activated: false,
+      baseY: baseY,
+    });
+  }
+}
+
+// ── Breathing Hints ──────────────────────────────────────────────────
+// Slow grimy-neon pulse that fades from off → neon green → off over ~3s.
+// Kicks in only after IDLE_THRESHOLD seconds without interaction — no nudge
+// until the student has had a chance to think.
+const IDLE_THRESHOLD = 3.0;       // seconds of inactivity before the glow appears
+const BREATH_PERIOD = 3.2;        // seconds per full inhale+exhale cycle
+const BREATH_PEAK_OPACITY = 0.85; // peak neon intensity (grimy, not UI-bright)
+const BREATH_FADE_IN = 1.2;       // seconds for the first fade-up to reach full cadence
+
+// Smooth easing for the fade — starts gentle, peaks softly, fades gently.
+// Equivalent to (1 - cos(2π·t))/2 shaped for a more organic curve.
+function breathCurve(t) {
+  // t ∈ [0, 1] over one full period
+  return 0.5 - 0.5 * Math.cos(t * Math.PI * 2);
+}
+
+function updateBreathingHints(elapsed) {
+  if (!coldOpenComplete) return;
+  if (foldingActive) return;
+
+  const idle = elapsed - lastInteractionTime;
+  const shouldBreathe = idle > IDLE_THRESHOLD;
+
+  // Ease-in envelope so the breathing doesn't snap on — it swells in gradually.
+  const envelope = shouldBreathe
+    ? Math.min(1.0, (idle - IDLE_THRESHOLD) / BREATH_FADE_IN)
+    : 0.0;
+
+  // Shared breath phase so hinges AND handle inhale/exhale in sync.
+  const phase = (elapsed % BREATH_PERIOD) / BREATH_PERIOD;
+  const breath = breathCurve(phase) * BREATH_PEAK_OPACITY * envelope;
+
+  // Hinges — only glow on unactivated hinges when the obelisk is intact.
+  if (!foldingComplete && obeliskState.pieces === 1) {
+    for (const hp of hingePoints) {
+      if (hp.activated) { hp.glowMat.opacity = 0; continue; }
+      hp.glowMat.opacity = breath;
+    }
+  } else {
+    // Ensure hinge glows are off when folded
+    for (const hp of hingePoints) hp.glowMat.opacity = 0;
+  }
+
+  // Handle — breathes on the innermost segment's original-top edge once the
+  // fold completes. The handle carries its own glow material in userData.
+  if (foldingComplete && handleMesh && handleMesh.userData.edgeGlowMat) {
+    handleMesh.userData.edgeGlowMat.opacity = breath;
+  }
+
+  // Exit sigil — once the room is fully factored the sigil breathes neon
+  // continuously (no idle threshold; its purpose is to signal "you're done").
+  if (exitSigilActive && exitSigilGlowMat) {
+    const sigilBreath = breathCurve(phase) * 0.95; // slightly brighter peak
+    exitSigilGlowMat.opacity = sigilBreath;
+  }
+}
+
+// ── Hinge Click Detection ────────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+
+// Unspool drag state — populated on handle-grab, cleared on release.
+let unspoolDrag = null;
+
+function onPointerDown(event) {
+  if (!coldOpenComplete || foldingActive) return;
+
+  // Check for exit sigil tap — the back-wall numeral, only tappable once the
+  // room is fully factored. Highest priority so it doesn't get swallowed by
+  // any other raycast target.
+  if (exitSigilActive && !exitSigilFired && exitSigilHitMesh) {
+    pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+    pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const sigilHits = raycaster.intersectObject(exitSigilHitMesh, false);
+    if (sigilHits.length > 0) {
+      exitSigilFired = true;
+      transitionToCalendarScreen();
+      return;
+    }
+  }
+
+  // Check for handle grab (unspool drag) — raycast against the large invisible
+  // hit-mesh on the handle group. If we hit, start a drag session that
+  // responds immediately to pointer motion.
+  if (foldingComplete && handleMesh && !unspoolDrag) {
+    pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+    pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hitTarget = handleMesh.userData.hitMesh || handleMesh;
+    const hits = raycaster.intersectObject(hitTarget, true);
+    if (hits.length > 0) {
+      beginHandleDrag(event);
+      return;
+    }
+  }
+
+  // Check for dex scroll drag — if the pointer hits the dex area, start
+  // horizontal scrolling. This lets the user pan through the full row of
+  // prime cubbies (34 for the N=144 suite).
+  if (primeDexGroup && !primeDexScrollDrag) {
+    pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+    pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const dexHits = raycaster.intersectObject(primeDexGroup, true);
+    if (dexHits.length > 0) {
+      beginDexScroll(event);
+      return;
+    }
+  }
+
+  pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+
+  // Only allow folds when obelisk is intact (segs.length === 1 equivalent)
+  if (obeliskState.pieces > 1) return;
+
+  // Find which hinge the user tapped. We raycast against the large invisible
+  // hit-sphere around each bead so the target is generously large.
+  const unactivated = hingePoints.filter((hp) => !hp.activated);
+  const hitMeshes = unactivated.map((hp) => hp.hitMesh);
+  const ringHits = raycaster.intersectObjects(hitMeshes, false);
+
+  if (ringHits.length > 0) {
+    const hp = unactivated.find((p) => p.hitMesh === ringHits[0].object);
+    if (hp) {
+      lastInteractionTime = performance.now() / 1000;
+      activateHinge(hp);
+    }
+  }
+}
+
+// ── Handle Drag → Unspool ───────────────────────────────────────────
+// On grab, we snapshot each hinge's current rotation (which is its fully-folded
+// target angle) and compute an overlapping progress window per hinge — just
+// like the old 2D app. As the user drags, each hinge's rotation is set to
+// targetRot * (1 - hProg) so the accordion visibly unspools proportionally.
+// Release past 0.85 commits; under that snaps back to folded.
+//
+// Feel: the segments are heavy chunks of metal. We model this as lifting a
+// chain by its far end — the hinge nearest the handle opens first, and the
+// drag distance required scales with how many "links" are still folded.
+
+const UNSPOOL_BASE_DRAG_PX = 140;  // pixels per hinge — more hinges = more pull
+const UNSPOOL_DEAD_ZONE_PX = 40;   // pull this far before anything starts moving
+const UNSPOOL_OVERLAP = 0.45;      // 0 = sequential, 1 = simultaneous
+const UNSPOOL_COMMIT_THRESHOLD = 0.80;
+const UNSPOOL_RESISTANCE_POWER = 2.2; // >1 = heavy start, accelerating lift
+
+function beginHandleDrag(event) {
+  // Determine whether the handle is currently on the floor or in the air so
+  // we can key the drag gesture off the correct direction: pulling upward
+  // from the floor, or "upward-and-inward" if the handle is in the air above
+  // the end segment.
+  const endSeg = obeliskSegments[obeliskSegments.length - 1];
+  endSeg.mesh.updateWorldMatrix(true, false);
+  const endWorldUp = new THREE.Vector3(0, 1, 0).applyQuaternion(endSeg.mesh.getWorldQuaternion(new THREE.Quaternion()));
+  // The handle edge's world position (local +Y of the end segment).
+  const handleWorldPos = new THREE.Vector3(0, obeliskState.divisor * CUBE_SIZE / 2, 0);
+  endSeg.mesh.localToWorld(handleWorldPos);
+
+  // Base center world position — stays put across folds.
+  const baseWorldPos = new THREE.Vector3();
+  if (obeliskGroup) obeliskGroup.getWorldPosition(baseWorldPos);
+
+  // Sort hinges INNERMOST→OUTERMOST. The innermost hinge (depth=1, nearest
+  // the handle end) opens first — the end link of the chain lifts before the
+  // whole chain peels off the floor.
+  const sortedHinges = [...obeliskState.hinges].sort((a, b) => a.depth - b.depth);
+  const n = sortedHinges.length;
+
+  // Overlapping progress windows.
+  const windowSize = 1 / (1 + (n - 1) * (1 - UNSPOOL_OVERLAP));
+  const starts = sortedHinges.map((_, i) => i * (1 - UNSPOOL_OVERLAP) * windowSize);
+
+  // Scale total drag distance by number of hinges so longer chains feel heavier.
+  const totalDragPx = UNSPOOL_BASE_DRAG_PX * n;
+
+  // "Center-ward" X direction — which way is the base from the handle?
+  // Positive centerSign means base is to the right of handle; we add
+  // rightward drag to progress. Negative means base is to the left; we add
+  // leftward drag. This matches the old app's oddFalls/landsLeft logic.
+  const centerSign = Math.sign(baseWorldPos.x - handleWorldPos.x) || 0;
+
+  unspoolDrag = {
+    startX: event.clientX,
+    startY: event.clientY,
+    active: true,
+    sortedHinges,
+    starts,
+    windowSize,
+    totalDragPx,
+    centerSign,
+  };
+
+  lastInteractionTime = performance.now() / 1000;
+  foldingActive = true; // block other interactions during drag
+
+  window.addEventListener("pointermove", onHandleDragMove);
+  window.addEventListener("pointerup", onHandleDragEnd);
+  window.addEventListener("pointercancel", onHandleDragEnd);
+}
+
+function computeHandleDragProgress(event) {
+  if (!unspoolDrag) return 0;
+
+  // Pull-up is always positive dragY — reach up toward the ceiling.
+  // Screen Y grows downward, so start.Y - current.Y = upward pull.
+  const dragY = unspoolDrag.startY - event.clientY;
+
+  // Additional progress from pulling "toward center" (where the base is),
+  // matching the old 2D app's X contribution at 0.4× weight.
+  const dragX = (event.clientX - unspoolDrag.startX) * unspoolDrag.centerSign;
+
+  // Combine — only positive pulls count.
+  const rawCombined = dragY + Math.max(0, dragX) * 0.4;
+
+  // Subtract the dead zone so the first few pixels feel inert (weight).
+  const past = Math.max(0, rawCombined - UNSPOOL_DEAD_ZONE_PX);
+
+  // Linear progress in [0, 1]
+  const linear = Math.min(1, past / unspoolDrag.totalDragPx);
+
+  // Apply resistance curve — heavy start, accelerating lift. pow(x, k) with
+  // k < 1 would front-load; k > 1 back-loads which is what we want: early
+  // drag yields tiny rotation, later drag yields lots.
+  const progress = Math.pow(linear, UNSPOOL_RESISTANCE_POWER);
+
+  return progress;
+}
+
+function applyUnspoolProgress(progress) {
+  if (!unspoolDrag) return;
+  const { sortedHinges, starts, windowSize } = unspoolDrag;
+  for (let i = 0; i < sortedHinges.length; i++) {
+    const h = sortedHinges[i];
+    const hProg = Math.max(0, Math.min(1, (progress - starts[i]) / windowSize));
+    h.group.rotation.z = h.targetRot * (1 - hProg);
+  }
+}
+
+function onHandleDragMove(event) {
+  if (!unspoolDrag || !unspoolDrag.active) return;
+  event.preventDefault();
+  const progress = computeHandleDragProgress(event);
+  applyUnspoolProgress(progress);
+}
+
+function onHandleDragEnd(event) {
+  if (!unspoolDrag) return;
+  unspoolDrag.active = false;
+  window.removeEventListener("pointermove", onHandleDragMove);
+  window.removeEventListener("pointerup", onHandleDragEnd);
+  window.removeEventListener("pointercancel", onHandleDragEnd);
+
+  const progress = computeHandleDragProgress(event);
+
+  if (progress >= UNSPOOL_COMMIT_THRESHOLD) {
+    // Commit — finish unspooling with a spring into fully-open state, then
+    // tear down the nested tree and rebuild the intact obelisk.
+    completeHandleDrag();
+  } else {
+    // Cancel — snap back to fully folded.
+    cancelHandleDrag();
+  }
+}
+
+function completeHandleDrag() {
+  if (!unspoolDrag) return;
+  const { sortedHinges } = unspoolDrag;
+
+  const tl = gsap.timeline({
+    onComplete: () => {
+      // Final teardown & rebuild (mirrors original startUnspooling's cleanup).
+      // Dispose handle (and its invisible hit mesh / glow).
+      disposeHandle();
+
+      // Rebuild intact 12-tall obelisk.
+      rebuildIntactObelisk();
+
+      foldingActive = false;
+      foldingComplete = false;
+      obeliskState.pieces = 1;
+      obeliskState.divisor = 0;
+      obeliskState.hinges = [];
+
+      // Re-enable hinge beads
+      for (const hp of hingePoints) {
+        hp.activated = false;
+        hp.ring.visible = true;
+        hp.glow.visible = true;
+        hp.hitMesh.visible = true;
+        hp.glowMat.opacity = 0;
+      }
+
+      unspoolDrag = null;
+      lastInteractionTime = performance.now() / 1000;
+    },
+  });
+
+  // Spring each hinge from its current rotation toward 0.
+  sortedHinges.forEach((h, i) => {
+    tl.to(
+      h.group.rotation,
+      {
+        z: 0,
+        duration: 0.45,
+        ease: "power2.out",
+        onComplete: () => {
+          if (i === sortedHinges.length - 1) {
+            playThud();
+            cameraShake(0.15, 0.18);
+          }
+        },
+      },
+      i * 0.08
+    );
+  });
+}
+
+function cancelHandleDrag() {
+  if (!unspoolDrag) return;
+  const { sortedHinges } = unspoolDrag;
+
+  // Spring each hinge back to its fully-folded target angle.
+  const tl = gsap.timeline({
+    onComplete: () => {
+      foldingActive = false;
+      unspoolDrag = null;
+      lastInteractionTime = performance.now() / 1000;
+    },
+  });
+  sortedHinges.forEach((h) => {
+    tl.to(h.group.rotation, { z: h.targetRot, duration: 0.35, ease: "power2.out" }, 0);
+  });
+}
+
+function disposeHandle() {
+  if (!handleMesh) return;
+  gsap.killTweensOf(handleMesh.scale);
+  const hitMesh = handleMesh.userData.hitMesh;
+  if (hitMesh) {
+    if (hitMesh.parent) hitMesh.parent.remove(hitMesh);
+    hitMesh.geometry.dispose();
+    hitMesh.material.dispose();
+  }
+  // Walk children and dispose
+  handleMesh.traverse((obj) => {
+    if (obj.isMesh) {
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) {
+        if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+        else obj.material.dispose();
+      }
+    }
+  });
+  if (handleMesh.parent) handleMesh.parent.remove(handleMesh);
+  handleMesh = null;
+}
+
+// ── Dex Scroll Drag ─────────────────────────────────────────────────
+// Horizontal pan: the user swipes left/right across the cubby strip to scroll
+// through the full list of primes (up to prime #34 = 139, for the N=144 suite).
+// Converts pointer pixels to world X using a tuned factor; clamped to bounds.
+
+const DEX_SCROLL_PX_PER_UNIT = 35; // pixels of drag per 1 world unit of scroll
+
+function beginDexScroll(event) {
+  primeDexScrollDrag = {
+    startClientX: event.clientX,
+    startGroupX: primeDexGroup.position.x,
+    moved: 0, // track how far we've actually moved (to disambiguate from accidental taps)
+  };
+  window.addEventListener("pointermove", onDexScrollMove);
+  window.addEventListener("pointerup", onDexScrollEnd);
+  window.addEventListener("pointercancel", onDexScrollEnd);
+}
+
+function onDexScrollMove(event) {
+  if (!primeDexScrollDrag) return;
+  event.preventDefault();
+  const dx = event.clientX - primeDexScrollDrag.startClientX;
+  primeDexScrollDrag.moved = Math.max(primeDexScrollDrag.moved, Math.abs(dx));
+  const worldDx = dx / DEX_SCROLL_PX_PER_UNIT;
+  const targetX = primeDexScrollDrag.startGroupX + worldDx;
+  // Clamp to scroll bounds so cubbies don't slide off into infinity.
+  const clampedX = Math.max(primeDexScrollMin, Math.min(primeDexScrollMax, targetX));
+  primeDexGroup.position.x = clampedX;
+  // Sync physics body so the cubby colliders move with the visible cubbies.
+  if (primeDexBody) {
+    primeDexBody.setNextKinematicTranslation({
+      x: clampedX,
+      y: primeDexGroup.position.y,
+      z: primeDexGroup.position.z,
+    });
+  }
+}
+
+function onDexScrollEnd() {
+  window.removeEventListener("pointermove", onDexScrollMove);
+  window.removeEventListener("pointerup", onDexScrollEnd);
+  window.removeEventListener("pointercancel", onDexScrollEnd);
+  primeDexScrollDrag = null;
+}
+
+// ── Accordion Fold Animation ────────────────────────────────────────
+//
+// The obelisk is rebuilt as a nested tree of THREE.Groups (hinges), mirroring
+// the old app's nested CSS transform architecture. Each hinge group's rotation
+// cascades to all descendants, so rotating the innermost hinge lifts its single
+// segment over the hinge; rotating the next-outer hinge lifts the 2-segment
+// subtree above it; etc. After all hinges fire, the segments tile flat along
+// the X-axis like dominoes fallen left (or right) of the base.
+//
+// Rotation is around the Z-axis (camera looks down -Z), so folds read visually
+// identical to the old 2D app: leftward = CCW (+rot.z), rightward = CW (-rot.z).
+
+let handleMesh = null;
+
+function activateHinge(hingePoint) {
+  if (foldingActive) return;
+  if (obeliskState.pieces !== 1) return; // only fold from intact obelisk
+
+  foldingActive = true;
+  hingePoint.activated = true;
+
+  const divisor = hingePoint.divisor;        // segment height in units
+  const numPieces = NUM_CUBES / divisor;     // e.g. 12/3 = 4 segments total
+  const segH = divisor * CUBE_SIZE;
+  const foldDir = -1;                         // always leftward first (matches old app)
+
+  // Hide every hinge bead while the obelisk is in its folded state — only
+  // one factor is "in progress" at a time, and the beads belong to the intact
+  // monolith. They'll reappear when the user unspools.
+  for (const hp of hingePoints) {
+    hp.ring.visible = false;
+    hp.glow.visible = false;
+    hp.hitMesh.visible = false;
+    hp.glowMat.opacity = 0;
+    if (hp.labelMat) hp.labelMat.opacity = 0;
+  }
+
+  // NOTE: Trinket spawn is deferred until after the fold animation settles
+  // and the numerals/materials have been applied. See the timeline onComplete
+  // below for the correct sequence (topple → material+numeral → trinket →
+  // dex registration → handle).
+
+  // ── Rebuild obelisk as nested hinge tree ────────────────────────────
+  // Remove the existing 12 unit-cubes and replace with `numPieces` tall
+  // segments arranged as nested groups. The base segment lives directly in
+  // obeliskGroup; each subsequent segment is wrapped by a hinge THREE.Group
+  // that sits at the pivot point (top edge of the segment below).
+
+  for (const seg of obeliskSegments) {
+    if (seg.mesh.parent) seg.mesh.parent.remove(seg.mesh);
+    seg.mesh.geometry.dispose();
+    if (Array.isArray(seg.mesh.material)) {
+      seg.mesh.material.forEach((m) => m.dispose());
+    } else {
+      seg.mesh.material.dispose();
+    }
+  }
+  obeliskSegments = [];
+  obeliskState.hinges = [];
+
+  // Build segments & hinges, outermost → innermost. The base is level 0 and
+  // does not move. Levels 1..(numPieces-1) each introduce a hinge and a
+  // segment. The hinge at level L, when rotated, carries segment L and all
+  // deeper hinges/segments with it.
+  //
+  // Fold direction alternates per hinge. Matching the old app: depth counts
+  // from 1 at the INNERMOST hinge (topmost, fires first) up to numPieces-1
+  // at the outermost. dir = depth % 2 === 0 ? -foldDir : foldDir.
+  // This guarantees the innermost hinge (depth=1, odd) fires with dir=foldDir
+  // (leftward for the default foldDir=-1), then alternates.
+
+  // Base segment — anchored at obeliskGroup origin. Blank during animation;
+  // the numeral is engraved after the accordion settles.
+  const baseSeg = createSegmentMesh(segH, null);
+  baseSeg.position.set(0, segH / 2, 0);
+  obeliskGroup.add(baseSeg);
+  obeliskSegments.push({ mesh: baseSeg, level: 0 });
+
+  let parent = baseSeg; // each subsequent hinge attaches to the prior segment
+  for (let L = 1; L < numPieces; L++) {
+    const depth = numPieces - L; // L=1 → depth=numPieces-1 (outermost); L=numPieces-1 → depth=1 (innermost)
+    const dir = depth % 2 === 0 ? -foldDir : foldDir; // -1 = left/CCW, +1 = right/CW
+    const targetRot = dir < 0 ? Math.PI : -Math.PI;   // leftward = +π, rightward = -π
+
+    // Hinge group pivot — at top edge of the parent segment (in parent's local frame).
+    // Parent mesh is centered at (0, 0, 0) of its own frame with height=segH.
+    // Top edge y = +segH/2. Pivot x = -CUBE_SIZE/2 for leftward, +CUBE_SIZE/2 for rightward.
+    const hinge = new THREE.Group();
+    hinge.position.set(dir < 0 ? -CUBE_SIZE / 2 : CUBE_SIZE / 2, segH / 2, 0);
+    parent.add(hinge);
+
+    // Segment mesh sits inside hinge such that its bottom edge (and correct side)
+    // rests at the hinge origin. Mesh center is offset +width/2 (opposite side of pivot)
+    // and +segH/2 (above the pivot) in hinge-local coords.
+    const segMesh = createSegmentMesh(segH, null);
+    segMesh.position.set(dir < 0 ? CUBE_SIZE / 2 : -CUBE_SIZE / 2, segH / 2, 0);
+    hinge.add(segMesh);
+
+    obeliskSegments.push({ mesh: segMesh, level: L });
+    obeliskState.hinges.push({ group: hinge, targetRot, dir, depth });
+
+    parent = segMesh; // next iteration's hinge will attach to this segment
+  }
+
+  obeliskState.pieces = numPieces;
+  obeliskState.divisor = divisor;
+  obeliskState.foldDir = foldDir;
+
+  // ── Animate the fold ─────────────────────────────────────────────────
+  // Sort by depth ASCENDING — innermost (topmost, depth=1) hinge fires first.
+  const sortedHinges = [...obeliskState.hinges].sort((a, b) => a.depth - b.depth);
+
+  const tl = gsap.timeline({
+    onComplete: () => {
+      // STEP 1: Apply material + engrave numerals on the now-settled segments.
+      // For prime divisors each segment gets the supernova shader; for composite
+      // divisors each segment gets its numeral engraved (upright regardless of
+      // whether the segment landed right-side-up or inverted).
+      const segH = obeliskState.divisor * CUBE_SIZE;
+      const divisorIsPrime = isPrime(obeliskState.divisor);
+      for (const seg of obeliskSegments) {
+        if (divisorIsPrime) {
+          applyPrimeMaterialToSegment(seg.mesh, obeliskState.divisor);
+        } else {
+          engraveNumeralOnSegment(seg.mesh, obeliskState.divisor, segH);
+        }
+      }
+
+      // Capture whether this factor is new (for trinket-drop gating) BEFORE
+      // createTrinket runs its dedup check so we can branch cleanly.
+      const isNewFactor = !altarTrinkets.some((t) => t.label === obeliskState.divisor);
+      const isNewPrime = divisorIsPrime && !primeDexRegistered.has(obeliskState.divisor);
+
+      // Record that this factor has been surfaced in this room, and check
+      // whether the room is now fully factored (wakes the exit sigil).
+      surfacedFactors.add(obeliskState.divisor);
+      checkRoomFullyFactored();
+
+      // STEP 2: If this factor is new to this room, drop the trinket onto the
+      // altar in its correct numerical slot.
+      if (isNewFactor) {
+        const matType = divisorIsPrime ? "prime" : "composite";
+        // Small delay so the "settling thud" on the segments reads as complete
+        // before the trinket begins its entrance.
+        gsap.delayedCall(0.25, () => {
+          createTrinket(obeliskState.divisor, matType);
+
+          // STEP 3: Then, if this prime hasn't been registered to the dex yet,
+          // play the registration animation.
+          if (isNewPrime) {
+            gsap.delayedCall(0.55, () => {
+              const sourceSeg = obeliskSegments[obeliskSegments.length - 1];
+              triggerPrimeDiscovery(obeliskState.divisor, sourceSeg);
+              primeDexRegistered.add(obeliskState.divisor);
+
+              // STEP 4: Reveal handle after registration kicks off.
+              gsap.delayedCall(0.3, () => {
+                foldingActive = false;
+                foldingComplete = true;
+                revealHandle();
+                lastInteractionTime = performance.now() / 1000;
+              });
+            });
+          } else {
+            // No dex registration needed — reveal handle right after trinket lands.
+            gsap.delayedCall(0.5, () => {
+              foldingActive = false;
+              foldingComplete = true;
+              revealHandle();
+              lastInteractionTime = performance.now() / 1000;
+            });
+          }
+        });
+      } else {
+        // Factor already seen — skip trinket entirely. Same for dex registration
+        // since that hinges on trinket-drop being part of the sequence.
+        foldingActive = false;
+        foldingComplete = true;
+        revealHandle();
+        lastInteractionTime = performance.now() / 1000;
+      }
+    },
+  });
+
+  sortedHinges.forEach((h, i) => {
+    tl.to(
+      h.group.rotation,
+      {
+        z: h.targetRot,
+        duration: 1.2,
+        ease: "bounce.out",
+        onStart: () => {
+          // tiny haptic-equivalent: camera micro-shake at start of each fall
+          if (i === 0) cameraShake(0.08, 0.1);
+        },
+        onComplete: () => {
+          playThud();
+          cameraShake(0.2, 0.25);
+        },
+      },
+      i * 0.15 // stagger — matches old app's 0.15s stagger
+    );
+  });
+
+  // Prime-discovery dex-drop is triggered from the fold timeline's onComplete
+  // above (once segments have settled and had their material swapped).
+}
+
+// Helper — create a single obelisk segment mesh of given height. An optional
+// numeral is engraved on the front face (+Z), which can be toggled on/off.
+// Pass `numeral: null` to create a blank segment (used during the fold
+// animation; numerals are applied after the accordion settles so the text
+// doesn't appear upside-down mid-flip).
+function createSegmentMesh(segH, numeral = null) {
+  const geo = new THREE.BoxGeometry(CUBE_SIZE, segH, CUBE_SIZE);
+
+  const baseMat = createCompositeMaterial();
+
+  // Build a front-face material — blank by default, engraved numeral if requested.
+  const frontMat = createCompositeMaterial();
+  if (numeral !== null) {
+    const units = Math.max(1, Math.round(segH / CUBE_SIZE));
+    // Canvas aspect matches the face aspect (1 wide × `units` tall) so the
+    // numeral renders without stretching.
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256 * units;
+    const ctx = canvas.getContext("2d");
+    // Aluminum base tint — matches the composite material color
+    ctx.fillStyle = "#c8ccd0";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Engraved-look numeral — dark, slight inset feel
+    ctx.fillStyle = "rgba(20,22,28,0.55)";
+    ctx.font = `bold ${Math.min(canvas.width, canvas.height) * 0.6}px 'Lexend', sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(numeral), canvas.width / 2, canvas.height / 2);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.anisotropy = 8;
+    frontMat.map = tex;
+    frontMat.needsUpdate = true;
+  }
+
+  // BoxGeometry face order: [+X, -X, +Y, -Y, +Z, -Z]; front face (toward camera) = +Z
+  const materials = [baseMat, baseMat, baseMat, baseMat, frontMat, baseMat];
+
+  const mesh = new THREE.Mesh(geo, materials);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  // Stash a reference to the front material so we can swap in a numeral later
+  mesh.userData.frontMat = frontMat;
+  return mesh;
+}
+
+// Engrave a numeral onto a segment's front face (called after fold completes).
+// "Gravity-aware": samples the segment's world orientation so the numeral is
+// always upright (top of the number toward the ceiling) regardless of whether
+// the segment flipped an even or odd number of times.
+function engraveNumeralOnSegment(mesh, numeral, segH) {
+  // Determine world orientation: transform the segment's local +Y into world
+  // space. If world-Y is negative, the segment is upside-down and we need to
+  // flip the numeral canvas so it reads upright to the viewer.
+  mesh.updateWorldMatrix(true, false);
+  const worldUp = new THREE.Vector3(0, 1, 0).applyQuaternion(mesh.getWorldQuaternion(new THREE.Quaternion()));
+  const inverted = worldUp.y < 0;
+
+  const units = Math.max(1, Math.round(segH / CUBE_SIZE));
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256 * units;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#c8ccd0";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  if (inverted) {
+    // Pre-rotate the canvas 180° so the baked texture renders upside-down
+    // relative to its own UVs. Once applied to an upside-down mesh face,
+    // those two inversions cancel → upright numeral in world space.
+    ctx.translate(canvas.width, canvas.height);
+    ctx.rotate(Math.PI);
+  }
+
+  ctx.fillStyle = "rgba(20,22,28,0.55)";
+  ctx.font = `bold ${Math.min(canvas.width, canvas.height) * 0.6}px 'Lexend', sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(numeral), canvas.width / 2, canvas.height / 2);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.anisotropy = 8;
+
+  const frontMat = mesh.userData.frontMat;
+  if (frontMat) {
+    if (frontMat.map) frontMat.map.dispose();
+    frontMat.map = tex;
+    frontMat.needsUpdate = true;
+  }
+}
+
+// Swap a segment's material to the prime supernova shader. Used when the
+// user chose a prime divisor so each resulting segment visibly glows with
+// the plasma material. Done after fold settles to avoid running the
+// expensive shader during the animation.
+// Gravity-aware: checks the segment's world orientation so the numeral baked
+// into the plasma reads upright regardless of how many 180° flips it took.
+function applyPrimeMaterialToSegment(mesh, numeral) {
+  mesh.updateWorldMatrix(true, false);
+  const worldUp = new THREE.Vector3(0, 1, 0).applyQuaternion(mesh.getWorldQuaternion(new THREE.Quaternion()));
+  const inverted = worldUp.y < 0;
+  // Segment's geometric height — BoxGeometry was created with height=segH.
+  // Read it back so the material's numeral canvas matches the face aspect.
+  const segH = mesh.geometry.parameters ? mesh.geometry.parameters.height : CUBE_SIZE;
+
+  const primeMat = createPrimeMaterial(numeral, inverted, segH);
+  mesh.material = primeMat;
+  mesh.userData.frontMat = null;
+  primeShaderMeshes.push(mesh);
+  const pl = new THREE.PointLight(0xff7030, 6.0, 10, 1.8);
+  pl.position.set(0, 0, 0.3);
+  mesh.add(pl);
+}
+
+// ── Reveal Handle (after fold completes) ────────────────────────────
+// The "handle" is the original top edge of the topmost obelisk segment —
+// the innermost segment in our nested hinge tree. After folds settle, that
+// edge may be up in the air (even number of falls) or on the floor (odd).
+//
+// Visible glow knob sits on that specific edge for the VISUAL cue.
+// The grab HIT ZONE is a large box covering the entire fallen row, so
+// the student can pull on any part of the laid-down obelisk to rebuild it.
+// This matches the mental model: you grab the "chain" anywhere and pull.
+function revealHandle() {
+  const endSeg = obeliskSegments[obeliskSegments.length - 1];
+  if (!endSeg) return;
+  const segH = obeliskState.divisor * CUBE_SIZE;
+
+  // Visible knob — parented to end segment's original-top edge, projects +Z.
+  const handleGroup = new THREE.Group();
+  handleGroup.position.set(0, segH / 2, 0);
+  endSeg.mesh.add(handleGroup);
+
+  const knobRadius = 0.38;
+  const knobGeo = new THREE.SphereGeometry(knobRadius, 20, 16);
+  const knobMat = new THREE.MeshStandardMaterial({
+    color: 0x0a2015,
+    metalness: 0.2,
+    roughness: 0.55,
+    emissive: 0x00ff88,
+    emissiveIntensity: 0.0,
+  });
+  const knob = new THREE.Mesh(knobGeo, knobMat);
+  knob.position.set(0, 0, CUBE_SIZE / 2 + knobRadius + 0.1);
+  handleGroup.add(knob);
+
+  // Larger glow halo — cast light on nearby surfaces so the knob reads
+  // as a beacon from across the room.
+  const glowGeo = new THREE.SphereGeometry(knobRadius * 2.2, 20, 16);
+  const glowMat = new THREE.MeshBasicMaterial({
+    color: 0x00ff88,
+    transparent: true,
+    opacity: 0.0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const glow = new THREE.Mesh(glowGeo, glowMat);
+  glow.position.copy(knob.position);
+  handleGroup.add(glow);
+
+  // Invisible hit zone — NOT parented to end segment; a free mesh covering
+  // the whole fallen row in world space. Computed from the row's bounding
+  // box so tapping anywhere on the row triggers the unspool drag.
+  const rowBounds = computeFallenRowBounds();
+  const hitGeo = new THREE.BoxGeometry(
+    rowBounds.width + 1.0,   // slight horizontal padding
+    rowBounds.height + 1.5,  // generous vertical padding
+    CUBE_SIZE * 3.0          // depth extends well in front and behind
+  );
+  const hitMat = new THREE.MeshBasicMaterial({
+    transparent: true,
+    opacity: 0.0,
+    depthWrite: false,
+  });
+  const hitMesh = new THREE.Mesh(hitGeo, hitMat);
+  hitMesh.position.set(rowBounds.centerX, rowBounds.centerY, rowBounds.centerZ);
+  hitMesh.renderOrder = 999;
+  scene.add(hitMesh); // world-space, not parented
+
+  // Expose handle interface
+  handleMesh = handleGroup;
+  handleMesh.userData.hitMesh = hitMesh;
+  handleMesh.userData.edgeGlowMat = glowMat;
+  handleMesh.userData.stripMat = knobMat;
+
+  handleGroup.scale.set(0, 0, 0);
+  gsap.to(handleGroup.scale, {
+    x: 1, y: 1, z: 1, duration: 0.5, ease: "back.out(2)",
+  });
+
+  lastInteractionTime = performance.now() / 1000;
+}
+
+// Compute the axis-aligned world bounding box of all fallen segments so we
+// can size the handle hit zone to cover the entire laid-down row.
+function computeFallenRowBounds() {
+  const box = new THREE.Box3();
+  for (const seg of obeliskSegments) {
+    seg.mesh.updateWorldMatrix(true, false);
+    box.expandByObject(seg.mesh);
+  }
+  const min = box.min, max = box.max;
+  return {
+    width:  max.x - min.x,
+    height: max.y - min.y,
+    depth:  max.z - min.z,
+    centerX: (min.x + max.x) / 2,
+    centerY: (min.y + max.y) / 2,
+    centerZ: (min.z + max.z) / 2,
+  };
+}
+
+// ── Unspool cleanup is now handled in completeHandleDrag (drag-based flow).
+// The old tap-to-unspool entry point was removed because the handle now
+// responds to pointer motion immediately from the moment the user grabs it.
+
+// Rebuild the intact 12-segment obelisk from scratch (called after unspool)
+function rebuildIntactObelisk() {
+  // Remove all existing segments (they're nested inside hinge groups)
+  for (const seg of obeliskSegments) {
+    if (seg.mesh.parent) seg.mesh.parent.remove(seg.mesh);
+    seg.mesh.geometry.dispose();
+    if (Array.isArray(seg.mesh.material)) {
+      seg.mesh.material.forEach((m) => m.dispose());
+    } else {
+      seg.mesh.material.dispose();
+    }
+  }
+  // Remove all hinge groups
+  for (const h of obeliskState.hinges) {
+    if (h.group.parent) h.group.parent.remove(h.group);
+  }
+  obeliskSegments = [];
+
+  // Recreate the intact obelisk as a single 12-unit-tall segment with "12"
+  // engraved on the front face. This keeps the visual identity of the
+  // monolith ("the number 12") rather than showing 12 stacked cubes.
+  const segH = NUM_CUBES * CUBE_SIZE;
+  const mesh = createSegmentMesh(segH, NUM_CUBES);
+  mesh.position.set(0, segH / 2, 0);
+  obeliskGroup.add(mesh);
+  obeliskSegments.push({ mesh, level: 0 });
+}
+
+// ── Sync & Render Loop ──────────────────────────────────────────────
+const clock = new THREE.Clock();
+
+function loop() {
+  requestAnimationFrame(loop);
+
+  const elapsed = clock.getElapsedTime();
+
+  // Step the physics world (fixed timestep)
+  world.step();
+
+  // Sync every dynamic body
+  for (const { mesh, rigidBody } of bodies) {
+    const pos = rigidBody.translation();
+    mesh.position.set(pos.x, pos.y, pos.z);
+
+    const rot = rigidBody.rotation();
+    mesh.quaternion.set(rot.x, rot.y, rot.z, rot.w);
+  }
+
+  // Update supernova shader time uniforms
+  for (const mesh of primeShaderMeshes) {
+    if (mesh.material.uniforms && mesh.material.uniforms.uTime) {
+      mesh.material.uniforms.uTime.value = elapsed;
+    }
+  }
+
+  // Update mirror cube camera for '1' block (if it exists)
+  if (mirrorCubeCamera && mirrorMesh) {
+    mirrorMesh.visible = false;
+    mirrorCubeCamera.position.copy(mirrorMesh.position);
+    mirrorCubeCamera.update(renderer, scene);
+    mirrorMesh.visible = true;
+  }
+
+  // Update breathing hints on idle hinges
+  updateBreathingHints(elapsed);
+
+  if (composer) {
+    composer.render();
+  } else {
+    renderer.render(scene, camera);
+  }
+}
+
+// ── Resize Handler ──────────────────────────────────────────────────
+function onResize() {
+  if (!camera || !renderer) return;
+
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (composer) {
+    composer.setSize(window.innerWidth, window.innerHeight);
+    if (bloomPass) bloomPass.setSize(window.innerWidth, window.innerHeight);
+  }
+  compositeScreenSize.w = window.innerWidth;
+  compositeScreenSize.h = window.innerHeight;
+}
+
+// ── Mobile Initialization (gated behind user gesture) ───────────────
+const startBtn = document.getElementById("startBtn");
+if (startBtn) {
+  startBtn.addEventListener("pointerdown", async () => {
+    try {
+      // Resume Audio Context for the "Thud" sounds
+      if (audioCtx && audioCtx.state === "suspended") {
+        await audioCtx.resume();
+      }
+
+      // Attempt to initialize the world
+      await init();
+
+      // Only remove the button if we successfully reached the loop
+      startBtn.style.display = "none";
+      console.log("Ignition successful.");
+    } catch (err) {
+      console.error("Critical Ignition Failure:", err);
+      alert("App failed to start. Check console for details.");
+    }
+  });
+}
+    </script>
+</body>
+</html>
