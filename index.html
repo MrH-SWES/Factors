@@ -193,7 +193,7 @@ const ALTAR_TOP_Y = ALTAR_PED_H + ALTAR_SLAB_H; // 2.0 — the working surface o
 const CUBE_SIZE = 1;
 const NUM_CUBES = 12;
 const PHYSICS_GRAVITY_ACCELERATION = 15;
-const IMPACT_SOUND_DELAY_MS = 40; // ~2.5 frames at 60fps so the socket collision resolves after the free-fall estimate
+const IMPACT_SOUND_DELAY_MS = 40; // ~2.4 frames at 60fps so the socket collision resolves after the free-fall estimate
 const INSTANT_IMPACT_DROP_DISTANCE = 0.01; // treat tiny drops as already landed so the thud can fire immediately
 
 const PRIMEDEX_SLOT_SPACING = 1.15;
@@ -1373,7 +1373,7 @@ function triggerPrimeDiscovery(divisor, sourceSeg) {
           if (dropDistance < INSTANT_IMPACT_DROP_DISTANCE) {
             playThud();
           } else {
-            const dropDurationMs = Math.sqrt(2 * dropDistance / PHYSICS_GRAVITY_ACCELERATION) * 1000; // Free-fall time: t = sqrt(2*d/g)
+            const dropDurationMs = Math.sqrt(2 * dropDistance / PHYSICS_GRAVITY_ACCELERATION) * 1000; // Free-fall time: t = sqrt(2*dropDistance/PHYSICS_GRAVITY_ACCELERATION)
             window.setTimeout(() => {
               playThud();
             }, dropDurationMs + IMPACT_SOUND_DELAY_MS);
