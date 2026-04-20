@@ -895,112 +895,28 @@ async function init() {
   scene.add(mirrorCubeCamera);
 
   // 6. Lighting ──────────────────────────────────────────────────────────
-  // A. Ambient Fill — strong hemisphere so the whole room reads as lit
-  // material (not black void). Warm top, cool-neutral bottom. This is the
-  // MAIN contributor to the mirror cube reflecting something interesting
-  // on every face — CubeCamera renders the scene from the mirror position,
-  // and if nothing is lit, nothing reflects.
-  const ambient = new THREE.HemisphereLight(0xc8beab, 0x3e3a36, 1.15);
+  // A. Cool Ambient Radiance — rich mystical blue/purple hemisphere to fill
+  // shadows and give the mirror cube cool tones to reflect.
+  const ambient = new THREE.HemisphereLight(0x301050, 0x202020, 0.8);
   scene.add(ambient);
 
-  // A2. Front Fill — diffuse light coming from in front of the scene (from
-  // the camera's side), so the fronts of objects — including the mirror
-  // cube's front face — have something to reflect. Low intensity, wide,
-  // no shadows so it reads as general environmental illumination.
-  const frontFill = new THREE.DirectionalLight(0xfff2e0, 0.55);
-  frontFill.position.set(0, 8, 25);
-  frontFill.castShadow = false;
-  scene.add(frontFill);
+  // B. Golden Back-Portal — powerful warm point light deep behind the altar,
+  // representing the golden radiance opening. Provides warm gold for the
+  // mirror cube to reflect and creates silhouetted geometry lit from behind.
+  const goldenPortal = new THREE.PointLight(0xffa040, 5.0, 100);
+  goldenPortal.position.set(0, 5, -30);
+  scene.add(goldenPortal);
 
-  // A3. Rear Fill — a soft light coming from BEHIND the obelisk so the
-  // back faces of the mirror cube and the obelisk's back aren't black.
-  const rearFill = new THREE.DirectionalLight(0xd8e0ea, 0.35);
-  rearFill.position.set(0, 6, -18);
-  rearFill.castShadow = false;
-  scene.add(rearFill);
-
-  // A4. Altar-area omnidirectional fill — a low-intensity point light floating
-  // above the altar so the mirror trinket ("1") reflects lit surroundings on
-  // every face. Without this, the CubeCamera sees a mostly-dark scene and
-  // renders the mirror as black.
-  const altarOmni = new THREE.PointLight(0xfff0dc, 55, 25, 1.8);
-  altarOmni.position.set(0, 5, ALTAR_Z);
-  altarOmni.castShadow = false;
-  scene.add(altarOmni);
-
-  // B. Diffuse Altar Light — warm wash over the altar and PrimeDex
-  const altarSpot = new THREE.SpotLight(0xfff5e6, 140);
-  altarSpot.position.set(0, 9, ALTAR_Z + 3);
-  altarSpot.target.position.set(0, 0, ALTAR_Z + 1);
-  altarSpot.angle = Math.PI / 2.5;
-  altarSpot.penumbra = 0.65;
-  altarSpot.decay = 1.5;
-  altarSpot.castShadow = true;
-  scene.add(altarSpot);
-  scene.add(altarSpot.target);
-
-  // C. 3-Point Obelisk Lighting
-  const obeliskTarget = new THREE.Object3D();
-  obeliskTarget.position.set(0, 4, STAGE_Z);
-  scene.add(obeliskTarget);
-
-  // Top-front — reduced decay so light reaches the floor
-  const spotFrontTop = new THREE.SpotLight(0xffffff, 200);
-  spotFrontTop.position.set(0, 16, STAGE_Z + 8);
-  spotFrontTop.target = obeliskTarget;
-  spotFrontTop.angle = 0.55;
-  spotFrontTop.penumbra = 0.5;
-  spotFrontTop.decay = 1.5;
-  spotFrontTop.castShadow = true;
-  scene.add(spotFrontTop);
-
-  // Left
-  const spotLeft = new THREE.SpotLight(0xffffff, 120);
-  spotLeft.position.set(-8, 13, STAGE_Z + 5);
-  spotLeft.target = obeliskTarget;
-  spotLeft.angle = 0.5;
-  spotLeft.penumbra = 0.5;
-  spotLeft.decay = 1.5;
-  spotLeft.castShadow = true;
-  scene.add(spotLeft);
-
-  // Right
-  const spotRight = new THREE.SpotLight(0xffffff, 120);
-  spotRight.position.set(8, 13, STAGE_Z + 5);
-  spotRight.target = obeliskTarget;
-  spotRight.angle = 0.5;
-  spotRight.penumbra = 0.5;
-  spotRight.decay = 1.5;
-  spotRight.castShadow = true;
-  scene.add(spotRight);
-
-  // E. Floor wash — a wide, dim spotlight aimed straight down at the mid-ground
-  // This creates the visible floor plane and light pools from the inspo image
-  const floorWash = new THREE.SpotLight(0xe8ddd0, 60);
-  floorWash.position.set(0, 10, ALTAR_Z);
-  floorWash.target.position.set(0, 0, ALTAR_Z);
-  floorWash.angle = Math.PI / 2;
-  floorWash.penumbra = 1.0;
-  floorWash.decay = 1.2;
-  floorWash.castShadow = false;
-  scene.add(floorWash);
-  scene.add(floorWash.target);
-
-  // D. Back Wall Downlights — warm pools washing the upper back wall.
-  // Aimed HIGH on the wall (upper third) to lift the room's apparent ceiling
-  // and pick out the exit-sigil numeral without blowing out the lower scene.
-  const downlightDefs = [ { x: -5 }, { x: 0 }, { x: 5 } ];
-  for (const dl of downlightDefs) {
-    const spot = new THREE.SpotLight(0xf5e6d0, 220);
-    spot.position.set(dl.x, 17, -8);      // very high, forward of back wall
-    spot.target.position.set(dl.x, 13, -13); // aim at upper third of back wall
-    spot.angle = 0.5;
-    spot.penumbra = 0.55;
-    spot.decay = 1.4;
-    spot.castShadow = false;
-    scene.add(spot);
-    scene.add(spot.target);
-  }
+  // Emissive plane visually representing the golden opening in the back.
+  const portalGeo = new THREE.PlaneGeometry(15, 20);
+  const portalMat = new THREE.MeshStandardMaterial({
+    color: 0x000000,
+    emissive: 0xffa040,
+    emissiveIntensity: 2.0,
+  });
+  const portalMesh = new THREE.Mesh(portalGeo, portalMat);
+  portalMesh.position.set(0, 5, -30);
+  scene.add(portalMesh);
 
   // 6. Room, Altar & Cold Open
   createRoom();
@@ -1099,7 +1015,6 @@ function createRoom() {
     .setFriction(0.8);
   world.createCollider(stageCd, stageRb);
 
-  // Wall wash lights replaced by back-wall downlights in init()
 }
 
 // ── Exit Sigil (back-wall numeral) ──────────────────────────────────
