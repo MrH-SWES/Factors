@@ -174,6 +174,7 @@ window.onerror = function (msg, src, line, col, err) {
 // ── Globals ──────────────────────────────────────────────────────────
 let scene, camera, renderer, world;
 let concreteTexture, concreteBumpTexture;
+let noiseDiffuseMap, noiseNormalMap;
 let brushedMetalTexture;
 let mirrorCubeCamera, mirrorRenderTarget, mirrorMaterial;
 let composer, bloomPass;
@@ -432,6 +433,111 @@ function createConcreteBumpTexture(size = 1024) {
   return texture;
 }
 
+// ── Procedural Stone Noise Textures ──────────────────────────────────
+// Multi-octave value noise shared by all non-prime stone materials so
+// every surface reads as the same hand-carved rock.
+
+function _buildNoiseHeights(size, octaves) {
+  const heights = new Float32Array(size * size);
+  for (const { scale, amp } of octaves) {
+    const gs = scale + 1;
+    const grid = new Float32Array(gs * gs);
+    for (let i = 0; i < grid.length; i++) grid[i] = Math.random();
+    for (let py = 0; py < size; py++) {
+      for (let px = 0; px < size; px++) {
+        const gx = (px / size) * scale;
+        const gy = (py / size) * scale;
+        const ix = Math.floor(gx), iy = Math.floor(gy);
+        const fx = gx - ix,       fy = gy - iy;
+        const ux = fx * fx * (3 - 2 * fx);
+        const uy = fy * fy * (3 - 2 * fy);
+        const v00 = grid[iy * gs + ix],       v10 = grid[iy * gs + ix + 1];
+        const v01 = grid[(iy + 1) * gs + ix], v11 = grid[(iy + 1) * gs + ix + 1];
+        heights[py * size + px] +=
+          ((1 - ux) * (1 - uy) * v00 + ux * (1 - uy) * v10 +
+           (1 - ux) *       uy  * v01 + ux *       uy  * v11) * amp;
+      }
+    }
+  }
+  return heights;
+}
+
+function createNoiseTexture(size = 512) {
+  const heights = _buildNoiseHeights(size, [
+    { scale: 4,  amp: 0.50 },
+    { scale: 8,  amp: 0.25 },
+    { scale: 16, amp: 0.125 },
+    { scale: 32, amp: 0.0625 },
+    { scale: 64, amp: 0.03125 },
+  ]);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const imgData = ctx.createImageData(size, size);
+  const d = imgData.data;
+  const base = 112; // 0x707070 neutral stone gray
+  const variation = 28;
+  for (let i = 0; i < size * size; i++) {
+    const v = (heights[i] - 0.5) * 2 * variation;
+    d[i * 4]     = Math.min(255, Math.max(0, base + v));
+    d[i * 4 + 1] = Math.min(255, Math.max(0, base + v));
+    d[i * 4 + 2] = Math.min(255, Math.max(0, base + v));
+    d[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(imgData, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(2, 2);
+  return texture;
+}
+
+function createNoiseNormalMap(size = 512) {
+  // Higher-contrast octave set for sharper carved-stone normals.
+  const heights = _buildNoiseHeights(size, [
+    { scale: 4,  amp: 0.50 },
+    { scale: 8,  amp: 0.25 },
+    { scale: 16, amp: 0.125 },
+    { scale: 32, amp: 0.0625 },
+  ]);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const imgData = ctx.createImageData(size, size);
+  const d = imgData.data;
+  const strength = 5.0;
+
+  const h = (x, y) => heights[((y + size) % size) * size + ((x + size) % size)];
+
+  for (let py = 0; py < size; py++) {
+    for (let px = 0; px < size; px++) {
+      const gx = (
+        -h(px - 1, py - 1) - 2 * h(px - 1, py) - h(px - 1, py + 1) +
+         h(px + 1, py - 1) + 2 * h(px + 1, py) + h(px + 1, py + 1)
+      ) * strength;
+      const gy = (
+        -h(px - 1, py - 1) - 2 * h(px, py - 1) - h(px + 1, py - 1) +
+         h(px - 1, py + 1) + 2 * h(px, py + 1) + h(px + 1, py + 1)
+      ) * strength;
+      const len = Math.sqrt(gx * gx + gy * gy + 1);
+      const nx = -gx / len, ny = -gy / len, nz = 1 / len;
+      const idx = (py * size + px) * 4;
+      d[idx]     = Math.min(255, Math.max(0, (nx * 0.5 + 0.5) * 255));
+      d[idx + 1] = Math.min(255, Math.max(0, (ny * 0.5 + 0.5) * 255));
+      d[idx + 2] = Math.min(255, Math.max(0, (nz * 0.5 + 0.5) * 255));
+      d[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(2, 2);
+  return texture;
+}
+
 function createBrushedMetalTexture(size = 512) {
   const canvas = document.createElement("canvas");
   canvas.width = size;
@@ -670,6 +776,8 @@ async function init() {
   concreteTexture = createConcreteTexture();
   concreteBumpTexture = createConcreteBumpTexture();
   brushedMetalTexture = createBrushedMetalTexture();
+  noiseDiffuseMap = createNoiseTexture();
+  noiseNormalMap  = createNoiseNormalMap();
 
   // 3. Camera — low-angle, monumental perspective. Framed so the obelisk
   // is the dominant visual element with altar + dex in the lower foreground.
@@ -914,22 +1022,22 @@ async function init() {
 // ── Room (Brutalist Concrete) ────────────────────────────────────────
 function createRoom() {
   const wallMat = new THREE.MeshStandardMaterial({
-    color: 0x555555,
-    roughness: 0.88,
-    metalness: 0.0,
-    map: concreteTexture,
-    bumpMap: concreteBumpTexture,
-    bumpScale: 0.8,
+    color: 0x707070,
+    roughness: 0.9,
+    metalness: 0.1,
+    map: noiseDiffuseMap,
+    normalMap: noiseNormalMap,
+    normalScale: new THREE.Vector2(2, 2),
   });
 
   // Matte poured-concrete floor
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x444444,
+    color: 0x707070,
     roughness: 0.9,
-    metalness: 0.02,
-    map: concreteTexture,
-    bumpMap: concreteBumpTexture,
-    bumpScale: 0.4,
+    metalness: 0.1,
+    map: noiseDiffuseMap,
+    normalMap: noiseNormalMap,
+    normalScale: new THREE.Vector2(2, 2),
   });
 
   const roomW = 800; // width (x) — vast horizon for 144-obelisk chain
@@ -1122,11 +1230,12 @@ function transitionToCalendarScreen() {
 function createAltar() {
 
   const altarMat = new THREE.MeshStandardMaterial({
-    color: 0x1a1a1c,
-    roughness: 0.95,
-    metalness: 0.02,
-    bumpMap: concreteBumpTexture,
-    bumpScale: 0.02,
+    color: 0x707070,
+    roughness: 0.9,
+    metalness: 0.1,
+    map: noiseDiffuseMap,
+    normalMap: noiseNormalMap,
+    normalScale: new THREE.Vector2(2, 2),
   });
 
   const pz = ALTAR_Z;
@@ -1234,11 +1343,12 @@ function createPrimeDex() {
 
   // Stone material — matches the altar, so the slab reads as part of it.
   const stoneMat = new THREE.MeshStandardMaterial({
-    color: 0x1a1a1c,
-    roughness: 0.92,
-    metalness: 0.02,
-    bumpMap: concreteBumpTexture,
-    bumpScale: 0.04,
+    color: 0x707070,
+    roughness: 0.9,
+    metalness: 0.1,
+    map: noiseDiffuseMap,
+    normalMap: noiseNormalMap,
+    normalScale: new THREE.Vector2(2, 2),
   });
 
   // ── Continuous bottom slab (trinkets rest on recessed socket floors above this) ──
