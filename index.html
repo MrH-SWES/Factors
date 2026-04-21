@@ -333,62 +333,53 @@ function createConcreteTexture(size = 1024) {
   canvas.height = size;
   const ctx = canvas.getContext("2d");
 
-  // Base: dark, desaturated concrete
-  ctx.fillStyle = "#4a4845";
+  // Base Dark Concrete from successful Scene.html
+  ctx.fillStyle = "#222222";
   ctx.fillRect(0, 0, size, size);
 
-  // Macro-stains: large sweeping patches of darker and lighter gray
-  // simulating age, moisture seepage, and mineral deposits
-  const stainCount = 18;
-  for (let s = 0; s < stainCount; s++) {
-    const sx = Math.random() * size;
-    const sy = Math.random() * size;
-    const rw = (0.15 + Math.random() * 0.45) * size;
-    const rh = (0.1 + Math.random() * 0.35) * size;
-    const dark = Math.random() > 0.45;
-    const alpha = 0.08 + Math.random() * 0.18;
-    const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, Math.max(rw, rh) * 0.7);
-    const col = dark ? `rgba(10,9,8,${alpha})` : `rgba(120,115,108,${alpha})`;
-    grad.addColorStop(0, col);
-    grad.addColorStop(1, "rgba(0,0,0,0)");
+  // Macro Stains
+  ctx.globalCompositeOperation = "screen";
+  for (let i = 0; i < 40; i++) {
+    const r = 50 + Math.random() * 250;
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, `rgba(40, 40, 40, ${Math.random() * 0.4})`);
+    g.addColorStop(1, "transparent");
+    ctx.fillStyle = g;
     ctx.save();
-    ctx.scale(rw / Math.max(rw, rh), rh / Math.max(rw, rh));
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(sx * (Math.max(rw, rh) / rw), sy * (Math.max(rw, rh) / rh), Math.max(rw, rh) * 0.7, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.translate(Math.random() * size, Math.random() * size);
+    ctx.scale(1, Math.random() * 0.5 + 0.5);
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
 
-  // Fine aggregate grain
+  // Micro Grain
+  ctx.globalCompositeOperation = "source-over";
   const imgData = ctx.getImageData(0, 0, size, size);
   const d = imgData.data;
   for (let i = 0; i < d.length; i += 4) {
-    const n = (Math.random() - 0.5) * 22;
+    const n = (Math.random() - 0.5) * 15;
     d[i] += n; d[i + 1] += n; d[i + 2] += n;
   }
   ctx.putImageData(imgData, 0, 0);
 
-  // Formwork panel grid
+  // Formwork Seams and Tie Holes
+  ctx.strokeStyle = "#111111";
+  ctx.lineWidth = 3;
   const panelW = size / 4;
   const panelH = size / 3;
-  ctx.strokeStyle = "rgba(0,0,0,0.22)";
-  ctx.lineWidth = 2;
   for (let px = 0; px < 4; px++) {
     for (let py = 0; py < 3; py++) {
       const x = px * panelW;
       const y = py * panelH;
       ctx.strokeRect(x + 1, y + 1, panelW - 2, panelH - 2);
 
-      // 4 tie holes per panel
-      ctx.fillStyle = "rgba(10,8,7,0.65)";
+      ctx.fillStyle = "#0a0a0a";
       const inset = 18;
-      const holeR = 4;
       const cxs = [x + inset, x + panelW - inset, x + inset, x + panelW - inset];
       const cys = [y + inset, y + inset, y + panelH - inset, y + panelH - inset];
       for (let h = 0; h < 4; h++) {
         ctx.beginPath();
-        ctx.arc(cxs[h], cys[h], holeR, 0, Math.PI * 2);
+        ctx.arc(cxs[h], cys[h], 5, 0, Math.PI * 2);
         ctx.fill();
       }
     }
@@ -407,49 +398,23 @@ function createConcreteRoughnessTexture(size = 1024) {
   canvas.height = size;
   const ctx = canvas.getContext("2d");
 
-  // Start fully rough (white = rough in roughnessMap)
-  ctx.fillStyle = "#ffffff";
+  // Base Roughness
+  ctx.fillStyle = "#cccccc";
   ctx.fillRect(0, 0, size, size);
 
-  // High-contrast polished pools — dark patches simulate worn, polished areas
-  // that catch specular highlights from the spotlights above
-  const poolCount = 14;
-  for (let p = 0; p < poolCount; p++) {
-    const px = Math.random() * size;
-    const py = Math.random() * size;
-    const pr = (0.08 + Math.random() * 0.22) * size;
-    // Varying degrees of polish: some nearly mirror-smooth (very dark), others lightly worn
-    const shine = Math.floor(Math.random() * 60);
-    const alpha = 0.5 + Math.random() * 0.45;
-    const grad = ctx.createRadialGradient(px, py, 0, px, py, pr);
-    grad.addColorStop(0, `rgba(${shine},${shine},${shine},${alpha})`);
-    grad.addColorStop(0.6, `rgba(${shine + 40},${shine + 40},${shine + 40},${alpha * 0.5})`);
-    grad.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(px, py, pr, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Fine noise — micro variation so no area is perfectly uniform
-  const imgData = ctx.getImageData(0, 0, size, size);
-  const d = imgData.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const n = (Math.random() - 0.5) * 40;
-    const v = Math.max(0, Math.min(255, d[i] + n));
-    d[i] = v; d[i + 1] = v; d[i + 2] = v;
-  }
-  ctx.putImageData(imgData, 0, 0);
-
-  // Panel seams as matte lines (lighter = rougher at seams)
-  ctx.strokeStyle = "rgba(255,255,255,0.6)";
-  ctx.lineWidth = 3;
-  const panelW = size / 4;
-  const panelH = size / 3;
-  for (let gx = 0; gx < 4; gx++) {
-    for (let gy = 0; gy < 3; gy++) {
-      ctx.strokeRect(gx * panelW + 1, gy * panelH + 1, panelW - 2, panelH - 2);
-    }
+  // Polished Pools (Darker = shinier)
+  ctx.globalCompositeOperation = "multiply";
+  for (let i = 0; i < 25; i++) {
+    const r = 100 + Math.random() * 300;
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, `rgba(50, 50, 50, ${Math.random() * 0.8 + 0.2})`);
+    g.addColorStop(1, "transparent");
+    ctx.fillStyle = g;
+    ctx.save();
+    ctx.translate(Math.random() * size, Math.random() * size);
+    ctx.scale(1, Math.random() * 0.5 + 0.5);
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   }
 
   const texture = new THREE.CanvasTexture(canvas);
@@ -771,7 +736,7 @@ async function init() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.25;
+  renderer.toneMappingExposure = 1.0;
   document.body.appendChild(renderer.domElement);
 
   try {
@@ -869,85 +834,67 @@ async function init() {
   scene.add(mirrorCubeCamera);
 
   // 6. Lighting ──────────────────────────────────────────────────────────
-  // A. Ambient — very dim, just enough to keep pitch-black pixels from
-  // dominating completely. All real illumination comes from spotlights.
-  const ambient = new THREE.AmbientLight(0x222228, 1.0);
+
+  // A. Ambient - Very dim, cool blue atmospheric bounce
+  const ambient = new THREE.HemisphereLight(0xaabbff, 0x111111, 0.08);
   scene.add(ambient);
 
-  // B. Dramatic Altar SpotLight — single hard source angled from top-left,
-  // aimed at the altar slab. Casts a deep shadow underneath the slab for
-  // a cinematic, brutalist look.
-  const altarSpot = new THREE.SpotLight(0xfff0dc, 280);
-  altarSpot.position.set(-8, 14, ALTAR_Z + 6);
+  // B. Dramatic Altar Key Light (Mapped to ALTAR_Z)
+  const altarSpot = new THREE.SpotLight(0xfff5e6, 2000);
+  altarSpot.position.set(-15, 25, ALTAR_Z + 10);
   altarSpot.target.position.set(0, 0, ALTAR_Z);
-  altarSpot.angle = 0.32;
-  altarSpot.penumbra = 0.18;
-  altarSpot.decay = 1.4;
+  altarSpot.angle = 0.5;
+  altarSpot.penumbra = 0.5;
+  altarSpot.decay = 1.8;
+  altarSpot.distance = 100;
   altarSpot.castShadow = true;
   altarSpot.shadow.mapSize.width = 2048;
   altarSpot.shadow.mapSize.height = 2048;
-  altarSpot.shadow.camera.near = 0.5;
-  altarSpot.shadow.camera.far = 60;
-  altarSpot.shadow.bias = -0.001;
+  altarSpot.shadow.bias = -0.0005;
   scene.add(altarSpot);
   scene.add(altarSpot.target);
 
-  // C. 3-Point Obelisk Lighting
+  // C. Obelisk Key Light (Mapped to STAGE_Z)
   const obeliskTarget = new THREE.Object3D();
   obeliskTarget.position.set(0, 4, STAGE_Z);
   scene.add(obeliskTarget);
 
-  // Top-front — reduced decay so light reaches the floor
-  const spotFrontTop = new THREE.SpotLight(0xffffff, 200);
-  spotFrontTop.position.set(0, 16, STAGE_Z + 8);
-  spotFrontTop.target = obeliskTarget;
-  spotFrontTop.angle = 0.55;
-  spotFrontTop.penumbra = 0.5;
-  spotFrontTop.decay = 1.5;
-  spotFrontTop.castShadow = true;
-  scene.add(spotFrontTop);
+  const obeliskSpot = new THREE.SpotLight(0xfff5e6, 2000);
+  obeliskSpot.position.set(-15, 25, STAGE_Z + 15);
+  obeliskSpot.target = obeliskTarget;
+  obeliskSpot.angle = 0.5;
+  obeliskSpot.penumbra = 0.5;
+  obeliskSpot.decay = 1.8;
+  obeliskSpot.distance = 100;
+  obeliskSpot.castShadow = true;
+  obeliskSpot.shadow.mapSize.width = 2048;
+  obeliskSpot.shadow.mapSize.height = 2048;
+  obeliskSpot.shadow.bias = -0.0005;
+  scene.add(obeliskSpot);
 
-  // Left
-  const spotLeft = new THREE.SpotLight(0xffffff, 120);
-  spotLeft.position.set(-8, 13, STAGE_Z + 5);
-  spotLeft.target = obeliskTarget;
-  spotLeft.angle = 0.5;
-  spotLeft.penumbra = 0.5;
-  spotLeft.decay = 1.5;
-  spotLeft.castShadow = true;
-  scene.add(spotLeft);
-
-  // Right
-  const spotRight = new THREE.SpotLight(0xffffff, 120);
-  spotRight.position.set(8, 13, STAGE_Z + 5);
+  // Subtle right fill for obelisk (so the right side isn't pitch black)
+  const spotRight = new THREE.SpotLight(0xffffff, 800);
+  spotRight.position.set(15, 15, STAGE_Z + 5);
   spotRight.target = obeliskTarget;
   spotRight.angle = 0.5;
   spotRight.penumbra = 0.5;
-  spotRight.decay = 1.5;
+  spotRight.decay = 1.8;
   spotRight.castShadow = true;
   scene.add(spotRight);
 
-  // D. Back Wall Downlights — tight spots wash the upper back wall.
-  // High intensity, narrow angle, high penumbra for soft-edged beams.
-  // Each spot gets a paired floor-level PointLight to fake GI bounce —
-  // light bouncing off the concrete and gently illuminating the dark room.
+  // D. The Backwall Scallop Lights
+  // The primealter back wall is at z = -13. We position these just in front of it.
   const downlightDefs = [ { x: -5 }, { x: 0 }, { x: 5 } ];
   for (const dl of downlightDefs) {
-    const spot = new THREE.SpotLight(0xf5e6d0, 320);
-    spot.position.set(dl.x, 17, -8);
-    spot.target.position.set(dl.x, 8, -13);
-    spot.angle = 0.22;
-    spot.penumbra = 0.75;
-    spot.decay = 1.4;
-    spot.castShadow = false;
-    scene.add(spot);
-    scene.add(spot.target);
-
-    // Fake GI bounce — dim, wide point light at floor level beneath each beam
-    const bouncePt = new THREE.PointLight(0xd4c4a0, 6, 14, 2.0);
-    bouncePt.position.set(dl.x, 0.3, -11);
-    bouncePt.castShadow = false;
-    scene.add(bouncePt);
+      const spot = new THREE.SpotLight(0xffffff, 800);
+      spot.position.set(dl.x, 22, -10);
+      spot.target.position.set(dl.x, 0, -13);
+      spot.angle = 0.25;
+      spot.penumbra = 0.6;
+      spot.decay = 1.5;
+      spot.castShadow = true;
+      scene.add(spot);
+      scene.add(spot.target);
   }
 
   // 6. Room, Altar & Cold Open
@@ -972,7 +919,7 @@ function createRoom() {
   const wallMat = new THREE.MeshStandardMaterial({
     color: 0x3a3835,
     roughness: 1.0,
-    metalness: 0.1,
+    metalness: 0.15,
     map: concreteTexture,
     roughnessMap: concreteRoughnessTexture,
     bumpMap: concreteBumpTexture,
@@ -983,7 +930,7 @@ function createRoom() {
   const floorMat = new THREE.MeshStandardMaterial({
     color: 0x2e2c2a,
     roughness: 1.0,
-    metalness: 0.1,
+    metalness: 0.15,
     map: concreteTexture,
     roughnessMap: concreteRoughnessTexture,
     bumpMap: concreteBumpTexture,
@@ -1182,7 +1129,7 @@ function createAltar() {
   const altarMat = new THREE.MeshStandardMaterial({
     color: 0x111113,
     roughness: 1.0,
-    metalness: 0.1,
+    metalness: 0.15,
     roughnessMap: concreteRoughnessTexture,
     bumpMap: concreteBumpTexture,
     bumpScale: 0.02,
