@@ -173,7 +173,7 @@ window.onerror = function (msg, src, line, col, err) {
 
 // ── Globals ──────────────────────────────────────────────────────────
 let scene, camera, renderer, world;
-let concreteTexture, concreteBumpTexture;
+let concreteTexture, concreteBumpTexture, concreteRoughnessTexture;
 let brushedMetalTexture;
 let mirrorCubeCamera, mirrorRenderTarget, mirrorMaterial;
 let composer, bloomPass;
@@ -333,15 +333,38 @@ function createConcreteTexture(size = 1024) {
   canvas.height = size;
   const ctx = canvas.getContext("2d");
 
-  // Base: warm-neutral concrete fill
-  ctx.fillStyle = "#6b6560";
+  // Base: dark, desaturated concrete
+  ctx.fillStyle = "#4a4845";
   ctx.fillRect(0, 0, size, size);
+
+  // Macro-stains: large sweeping patches of darker and lighter gray
+  // simulating age, moisture seepage, and mineral deposits
+  const stainCount = 18;
+  for (let s = 0; s < stainCount; s++) {
+    const sx = Math.random() * size;
+    const sy = Math.random() * size;
+    const rw = (0.15 + Math.random() * 0.45) * size;
+    const rh = (0.1 + Math.random() * 0.35) * size;
+    const dark = Math.random() > 0.45;
+    const alpha = 0.08 + Math.random() * 0.18;
+    const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, Math.max(rw, rh) * 0.7);
+    const col = dark ? `rgba(10,9,8,${alpha})` : `rgba(120,115,108,${alpha})`;
+    grad.addColorStop(0, col);
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.save();
+    ctx.scale(rw / Math.max(rw, rh), rh / Math.max(rw, rh));
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(sx * (Math.max(rw, rh) / rw), sy * (Math.max(rw, rh) / rh), Math.max(rw, rh) * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 
   // Fine aggregate grain
   const imgData = ctx.getImageData(0, 0, size, size);
   const d = imgData.data;
   for (let i = 0; i < d.length; i += 4) {
-    const n = (Math.random() - 0.5) * 18;
+    const n = (Math.random() - 0.5) * 22;
     d[i] += n; d[i + 1] += n; d[i + 2] += n;
   }
   ctx.putImageData(imgData, 0, 0);
@@ -349,7 +372,7 @@ function createConcreteTexture(size = 1024) {
   // Formwork panel grid
   const panelW = size / 4;
   const panelH = size / 3;
-  ctx.strokeStyle = "rgba(0,0,0,0.18)";
+  ctx.strokeStyle = "rgba(0,0,0,0.22)";
   ctx.lineWidth = 2;
   for (let px = 0; px < 4; px++) {
     for (let py = 0; py < 3; py++) {
@@ -358,7 +381,7 @@ function createConcreteTexture(size = 1024) {
       ctx.strokeRect(x + 1, y + 1, panelW - 2, panelH - 2);
 
       // 4 tie holes per panel
-      ctx.fillStyle = "rgba(20,18,16,0.55)";
+      ctx.fillStyle = "rgba(10,8,7,0.65)";
       const inset = 18;
       const holeR = 4;
       const cxs = [x + inset, x + panelW - inset, x + inset, x + panelW - inset];
@@ -368,6 +391,64 @@ function createConcreteTexture(size = 1024) {
         ctx.arc(cxs[h], cys[h], holeR, 0, Math.PI * 2);
         ctx.fill();
       }
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(4, 4);
+  return texture;
+}
+
+function createConcreteRoughnessTexture(size = 1024) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+
+  // Start fully rough (white = rough in roughnessMap)
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, size, size);
+
+  // High-contrast polished pools — dark patches simulate worn, polished areas
+  // that catch specular highlights from the spotlights above
+  const poolCount = 14;
+  for (let p = 0; p < poolCount; p++) {
+    const px = Math.random() * size;
+    const py = Math.random() * size;
+    const pr = (0.08 + Math.random() * 0.22) * size;
+    // Varying degrees of polish: some nearly mirror-smooth (very dark), others lightly worn
+    const shine = Math.floor(Math.random() * 60);
+    const alpha = 0.5 + Math.random() * 0.45;
+    const grad = ctx.createRadialGradient(px, py, 0, px, py, pr);
+    grad.addColorStop(0, `rgba(${shine},${shine},${shine},${alpha})`);
+    grad.addColorStop(0.6, `rgba(${shine + 40},${shine + 40},${shine + 40},${alpha * 0.5})`);
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(px, py, pr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Fine noise — micro variation so no area is perfectly uniform
+  const imgData = ctx.getImageData(0, 0, size, size);
+  const d = imgData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (Math.random() - 0.5) * 40;
+    const v = Math.max(0, Math.min(255, d[i] + n));
+    d[i] = v; d[i + 1] = v; d[i + 2] = v;
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  // Panel seams as matte lines (lighter = rougher at seams)
+  ctx.strokeStyle = "rgba(255,255,255,0.6)";
+  ctx.lineWidth = 3;
+  const panelW = size / 4;
+  const panelH = size / 3;
+  for (let gx = 0; gx < 4; gx++) {
+    for (let gy = 0; gy < 3; gy++) {
+      ctx.strokeRect(gx * panelW + 1, gy * panelH + 1, panelW - 2, panelH - 2);
     }
   }
 
@@ -669,6 +750,7 @@ async function init() {
   // Generate shared concrete textures
   concreteTexture = createConcreteTexture();
   concreteBumpTexture = createConcreteBumpTexture();
+  concreteRoughnessTexture = createConcreteRoughnessTexture();
   brushedMetalTexture = createBrushedMetalTexture();
 
   // 3. Camera — low-angle, monumental perspective. Framed so the obelisk
@@ -787,47 +869,26 @@ async function init() {
   scene.add(mirrorCubeCamera);
 
   // 6. Lighting ──────────────────────────────────────────────────────────
-  // A. Ambient Fill — strong hemisphere so the whole room reads as lit
-  // material (not black void). Warm top, cool-neutral bottom. This is the
-  // MAIN contributor to the mirror cube reflecting something interesting
-  // on every face — CubeCamera renders the scene from the mirror position,
-  // and if nothing is lit, nothing reflects.
-  const ambient = new THREE.HemisphereLight(0xc8beab, 0x3e3a36, 1.15);
+  // A. Ambient — very dim, just enough to keep pitch-black pixels from
+  // dominating completely. All real illumination comes from spotlights.
+  const ambient = new THREE.AmbientLight(0x222228, 1.0);
   scene.add(ambient);
 
-  // A2. Front Fill — diffuse light coming from in front of the scene (from
-  // the camera's side), so the fronts of objects — including the mirror
-  // cube's front face — have something to reflect. Low intensity, wide,
-  // no shadows so it reads as general environmental illumination.
-  const frontFill = new THREE.DirectionalLight(0xfff2e0, 0.55);
-  frontFill.position.set(0, 8, 25);
-  frontFill.castShadow = false;
-  scene.add(frontFill);
-
-  // A3. Rear Fill — a soft light coming from BEHIND the obelisk so the
-  // back faces of the mirror cube and the obelisk's back aren't black.
-  const rearFill = new THREE.DirectionalLight(0xd8e0ea, 0.35);
-  rearFill.position.set(0, 6, -18);
-  rearFill.castShadow = false;
-  scene.add(rearFill);
-
-  // A4. Altar-area omnidirectional fill — a low-intensity point light floating
-  // above the altar so the mirror trinket ("1") reflects lit surroundings on
-  // every face. Without this, the CubeCamera sees a mostly-dark scene and
-  // renders the mirror as black.
-  const altarOmni = new THREE.PointLight(0xfff0dc, 55, 25, 1.8);
-  altarOmni.position.set(0, 5, ALTAR_Z);
-  altarOmni.castShadow = false;
-  scene.add(altarOmni);
-
-  // B. Diffuse Altar Light — warm wash over the altar and PrimeDex
-  const altarSpot = new THREE.SpotLight(0xfff5e6, 140);
-  altarSpot.position.set(0, 9, ALTAR_Z + 3);
-  altarSpot.target.position.set(0, 0, ALTAR_Z + 1);
-  altarSpot.angle = Math.PI / 2.5;
-  altarSpot.penumbra = 0.65;
-  altarSpot.decay = 1.5;
+  // B. Dramatic Altar SpotLight — single hard source angled from top-left,
+  // aimed at the altar slab. Casts a deep shadow underneath the slab for
+  // a cinematic, brutalist look.
+  const altarSpot = new THREE.SpotLight(0xfff0dc, 280);
+  altarSpot.position.set(-8, 14, ALTAR_Z + 6);
+  altarSpot.target.position.set(0, 0, ALTAR_Z);
+  altarSpot.angle = 0.32;
+  altarSpot.penumbra = 0.18;
+  altarSpot.decay = 1.4;
   altarSpot.castShadow = true;
+  altarSpot.shadow.mapSize.width = 2048;
+  altarSpot.shadow.mapSize.height = 2048;
+  altarSpot.shadow.camera.near = 0.5;
+  altarSpot.shadow.camera.far = 60;
+  altarSpot.shadow.bias = -0.001;
   scene.add(altarSpot);
   scene.add(altarSpot.target);
 
@@ -866,32 +927,27 @@ async function init() {
   spotRight.castShadow = true;
   scene.add(spotRight);
 
-  // E. Floor wash — a wide, dim spotlight aimed straight down at the mid-ground
-  // This creates the visible floor plane and light pools from the inspo image
-  const floorWash = new THREE.SpotLight(0xe8ddd0, 60);
-  floorWash.position.set(0, 10, ALTAR_Z);
-  floorWash.target.position.set(0, 0, ALTAR_Z);
-  floorWash.angle = Math.PI / 2;
-  floorWash.penumbra = 1.0;
-  floorWash.decay = 1.2;
-  floorWash.castShadow = false;
-  scene.add(floorWash);
-  scene.add(floorWash.target);
-
-  // D. Back Wall Downlights — warm pools washing the upper back wall.
-  // Aimed HIGH on the wall (upper third) to lift the room's apparent ceiling
-  // and pick out the exit-sigil numeral without blowing out the lower scene.
+  // D. Back Wall Downlights — tight spots wash the upper back wall.
+  // High intensity, narrow angle, high penumbra for soft-edged beams.
+  // Each spot gets a paired floor-level PointLight to fake GI bounce —
+  // light bouncing off the concrete and gently illuminating the dark room.
   const downlightDefs = [ { x: -5 }, { x: 0 }, { x: 5 } ];
   for (const dl of downlightDefs) {
-    const spot = new THREE.SpotLight(0xf5e6d0, 220);
-    spot.position.set(dl.x, 17, -8);      // very high, forward of back wall
-    spot.target.position.set(dl.x, 13, -13); // aim at upper third of back wall
-    spot.angle = 0.5;
-    spot.penumbra = 0.55;
+    const spot = new THREE.SpotLight(0xf5e6d0, 320);
+    spot.position.set(dl.x, 17, -8);
+    spot.target.position.set(dl.x, 8, -13);
+    spot.angle = 0.22;
+    spot.penumbra = 0.75;
     spot.decay = 1.4;
     spot.castShadow = false;
     scene.add(spot);
     scene.add(spot.target);
+
+    // Fake GI bounce — dim, wide point light at floor level beneath each beam
+    const bouncePt = new THREE.PointLight(0xd4c4a0, 6, 14, 2.0);
+    bouncePt.position.set(dl.x, 0.3, -11);
+    bouncePt.castShadow = false;
+    scene.add(bouncePt);
   }
 
   // 6. Room, Altar & Cold Open
@@ -914,20 +970,22 @@ async function init() {
 // ── Room (Brutalist Concrete) ────────────────────────────────────────
 function createRoom() {
   const wallMat = new THREE.MeshStandardMaterial({
-    color: 0x555555,
-    roughness: 0.88,
-    metalness: 0.0,
+    color: 0x3a3835,
+    roughness: 1.0,
+    metalness: 0.1,
     map: concreteTexture,
+    roughnessMap: concreteRoughnessTexture,
     bumpMap: concreteBumpTexture,
     bumpScale: 0.8,
   });
 
-  // Matte poured-concrete floor
+  // Sealed concrete floor — roughnessMap drives patchy specular reflections
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x444444,
-    roughness: 0.9,
-    metalness: 0.02,
+    color: 0x2e2c2a,
+    roughness: 1.0,
+    metalness: 0.1,
     map: concreteTexture,
+    roughnessMap: concreteRoughnessTexture,
     bumpMap: concreteBumpTexture,
     bumpScale: 0.4,
   });
@@ -1122,9 +1180,10 @@ function transitionToCalendarScreen() {
 function createAltar() {
 
   const altarMat = new THREE.MeshStandardMaterial({
-    color: 0x1a1a1c,
-    roughness: 0.95,
-    metalness: 0.02,
+    color: 0x111113,
+    roughness: 1.0,
+    metalness: 0.1,
+    roughnessMap: concreteRoughnessTexture,
     bumpMap: concreteBumpTexture,
     bumpScale: 0.02,
   });
