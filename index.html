@@ -753,40 +753,21 @@ async function init() {
   scene.add(altarSpot);
   scene.add(altarSpot.target);
 
-  // C. 3-Point Obelisk Lighting
+  // C. Obelisk Key Light
   const obeliskTarget = new THREE.Object3D();
   obeliskTarget.position.set(0, 4, STAGE_Z);
   scene.add(obeliskTarget);
 
-  // Top-front — reduced decay so light reaches the floor
+  // Single overhead spotlight — raised higher for stronger top-down
+  // illumination on the obelisk.
   const spotFrontTop = new THREE.SpotLight(0xffffff, 200);
-  spotFrontTop.position.set(0, 16, STAGE_Z + 8);
+  spotFrontTop.position.set(0, 22, STAGE_Z + 7);
   spotFrontTop.target = obeliskTarget;
-  spotFrontTop.angle = 0.55;
+  spotFrontTop.angle = 0.42;
   spotFrontTop.penumbra = 0.5;
   spotFrontTop.decay = 1.5;
   spotFrontTop.castShadow = true;
   scene.add(spotFrontTop);
-
-  // Left
-  const spotLeft = new THREE.SpotLight(0xffffff, 120);
-  spotLeft.position.set(-8, 13, STAGE_Z + 5);
-  spotLeft.target = obeliskTarget;
-  spotLeft.angle = 0.5;
-  spotLeft.penumbra = 0.5;
-  spotLeft.decay = 1.5;
-  spotLeft.castShadow = true;
-  scene.add(spotLeft);
-
-  // Right
-  const spotRight = new THREE.SpotLight(0xffffff, 120);
-  spotRight.position.set(8, 13, STAGE_Z + 5);
-  spotRight.target = obeliskTarget;
-  spotRight.angle = 0.5;
-  spotRight.penumbra = 0.5;
-  spotRight.decay = 1.5;
-  spotRight.castShadow = true;
-  scene.add(spotRight);
 
   // E. Floor wash — a wide, dim spotlight aimed straight down at the mid-ground
   // This creates the visible floor plane and light pools from the inspo image
